@@ -8,6 +8,7 @@ permissions:
 jobs:
   web:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -19,6 +20,7 @@ jobs:
   # The native plugin compiles per platform; only Rust changes need it.
   changes:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
     steps:
@@ -36,6 +38,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
