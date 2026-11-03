@@ -9,10 +9,22 @@ export interface AppConfig {
   preset: "chat"
   modules: string[]
   template: { name: "create-alwith"; version: string }
-  /** GitHub Releases based auto update: the app's own `owner/repo` and the Tauri updater public key. */
-  updates?: { github: string; pubkey: string }
+  /**
+   * Signed auto update. `pubkey` is the Tauri updater public key; releases come from `endpoints`
+   * (HTTPS on any host, with `{{target}}`, `{{arch}}`, `{{current_version}}`, `{{bundle_type}}`),
+   * the GitHub Releases of `github` (`owner/repo`), or both. `requireSignedVersion` defaults to true.
+   */
+  updates?: { github?: string; endpoints?: string[]; pubkey: string; requireSignedVersion?: boolean }
 }
 export declare function updaterEndpoint(github: string): string
+export declare function updaterConfig(updates: NonNullable<AppConfig["updates"]>): {
+  pubkey: string
+  endpoints: string[]
+  requireSignedVersion: boolean
+  windows: { installMode: "passive" }
+}
 export declare function validateConfig(value: unknown): AppConfig
 export declare function safePath(root: string, relative: string): string
 export declare function configureProject(root: string, options?: { icons?: boolean }): Promise<void>
+/** Generates the Tauri bundle icons from `alwith.app.json` when they are missing (a fresh project); existing icons stay. */
+export declare function ensureIcons(root: string): Promise<void>

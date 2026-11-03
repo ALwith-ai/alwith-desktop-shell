@@ -1,9 +1,14 @@
 [package]
 name = "tauri-plugin-alwith-desktop-shell"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2024"
 links = "tauri-plugin-alwith-desktop-shell"
 license = "AGPL-3.0-only"
+license-file = "../LICENSE"
+description = "Default native desktop shell for ALwith applications: menus, window chrome, CLI status and signed application updates"
+repository = "https://github.com/ALwith-ai/alwith-desktop-shell"
+include = ["Cargo.toml", "build.rs", "src/**/*.rs", "permissions/**/*"]
+readme = false
 [workspace]
 [build-dependencies]
 tauri-plugin = { version = "3.0.0-alpha.3", features = ["build"] }
@@ -16,7 +21,10 @@ tauri-plugin-updater = { version = "3.0.0-alpha.3", default-features = false, fe
 rfd = { version = "0.16", default-features = false, features = ["tokio", "gtk3", "common-controls-v6"] }
 
 tokio = { version = "1", features = ["process", "time", "sync", "macros", "rt-multi-thread"] }
-base64 = "0.23"
-minisign-verify = "0.3"
 semver = "1"
 serde_json = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+flate2 = "1.1"
+tar = "0.4"

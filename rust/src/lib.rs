@@ -9,14 +9,59 @@ use tauri::{Emitter, Manager};
 pub struct ShellState {
     pub platform: &'static str,
     pub backdrop: &'static str,
-    /// `plugins.updater` exists in the generated config, so the application registered `tauri-plugin-updater`.
+    /// `plugins.updater` has endpoints and a public key (`updates_configured`), so the application registered `tauri-plugin-updater`.
     pub updates: bool,
 }
 
-/// Generated apps register `tauri_plugin_updater` only when `alwith.app.json` declares `updates`,
-/// which is the only way `plugins.updater` reaches the Tauri config.
+pub use updater::UpdaterOptions;
+
+/// Who installs the main window's native material and Atlas.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeWindow {
+    /// The shell installs macOS material or Windows acrylic and Atlas (the default).
+    Shell,
+    /// The application installs both itself; the shell touches neither (Atlas refuses a second
+    /// install). `native_backdrop` is what the application installed, reported as `backdrop`
+    /// `"native"` (true) or `"opaque"` (false).
+    Host { native_backdrop: bool },
+}
+
+/// Application choices for the shell plugin.
+#[derive(Clone)]
+pub struct ShellOptions {
+    updater: UpdaterOptions,
+    native_window: NativeWindow,
+}
+
+impl Default for ShellOptions {
+    fn default() -> Self {
+        Self { updater: UpdaterOptions::default(), native_window: NativeWindow::Shell }
+    }
+}
+
+impl ShellOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The updater's choices; see [`UpdaterOptions`].
+    pub fn updater(mut self, updater: UpdaterOptions) -> Self {
+        self.updater = updater;
+        self
+    }
+
+    /// Leave the main window's material and Atlas to the application; see [`NativeWindow::Host`].
+    pub fn host_native_window(mut self, native_backdrop: bool) -> Self {
+        self.native_window = NativeWindow::Host { native_backdrop };
+        self
+    }
+}
+
+/// Whether `plugins.updater` carries endpoints and a public key, exactly as the updater requires.
+/// Applications register `tauri_plugin_updater` only when this is true, because the plugin refuses
+/// a configuration without a public key.
 pub fn updates_configured(config: &tauri::Config) -> bool {
-    config.plugins.0.contains_key("updater")
+    updater::valid_updater_config(config.plugins.0.get("updater"))
 }
 
 /// The platform's folder dialog, for a draft's new project; `None` when the user cancels.
@@ -127,16 +172,30 @@ fn install_menu(app: &tauri::AppHandle, locale: &str) -> tauri::Result<()> {
 
 /// Install once in the application builder. Locale is product data, not styling configuration.
 pub fn init(locale: &str) -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
-    plugin(Some(locale.to_owned()))
+    init_with_options(Some(locale), ShellOptions::default())
+}
+
+/// `init` with the application's updater choices (install window, Windows exit hooks, debug opt-in).
+pub fn init_with(locale: &str, updater: UpdaterOptions) -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
+    init_with_options(Some(locale), ShellOptions::new().updater(updater))
 }
 
 /// The same plugin for applications that own a complete menu: identical commands and native
 /// material, without the default menu.
 pub fn init_native() -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
-    plugin(None)
+    init_with_options(None, ShellOptions::default())
 }
 
-fn plugin(locale: Option<String>) -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
+/// `init_native` with the application's updater choices.
+pub fn init_native_with(updater: UpdaterOptions) -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
+    init_with_options(None, ShellOptions::new().updater(updater))
+}
+
+/// The plugin with every application choice: the default menu in `locale` (`None` for an
+/// application that owns its complete menu), the updater, and who installs the native window.
+pub fn init_with_options(locale: Option<&str>, options: ShellOptions) -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
+    let ShellOptions { updater, native_window } = options;
+    let locale = locale.map(str::to_owned);
     tauri::plugin::Builder::new("alwith-desktop-shell")
         .invoke_handler(tauri::generate_handler![
             cli_status::cli_status,
@@ -148,17 +207,25 @@ fn plugin(locale: Option<String>) -> tauri::plugin::TauriPlugin<tauri::DynRuntim
             updater::commands::updater_check,
             updater::commands::updater_install_and_relaunch
         ])
-        .setup(|app, _| {
+        .setup(move |app, _| {
             app.manage(ShellStatus::new(Err("Desktop shell is not ready".into())));
             // Disabled without a configured updater; otherwise checks in the background and downloads hits.
-            updater::init(app);
+            updater::init(app, updater.clone());
             Ok(())
         })
         .on_event(move |app, event| {
-            if !matches!(event, tauri::RunEvent::Ready) {
-                return;
+            match event {
+                tauri::RunEvent::Ready => {}
+                // A programmatic exit or restart, or the event loop ending. A user's close request
+                // (`code: None`) may still be prevented by the application, so it does not stop updates.
+                tauri::RunEvent::ExitRequested { code: Some(_), .. } | tauri::RunEvent::Exit => {
+                    return updater::shutdown(app);
+                }
+                _ => return,
             }
-            let result = install(app, locale.as_deref()).map_err(|error| error.to_string());
+            // Every plugin is set up by now, so recovery and the schedule can use tauri-plugin-updater.
+            updater::start(app);
+            let result = install(app, locale.as_deref(), native_window).map_err(|error| error.to_string());
             if let Err(error) = &result {
                 log::error!("Desktop shell: {error}");
             }
@@ -167,12 +234,26 @@ fn plugin(locale: Option<String>) -> tauri::plugin::TauriPlugin<tauri::DynRuntim
         .build()
 }
 
-fn install(app: &tauri::AppHandle, locale: Option<&str>) -> Result<ShellState, Box<dyn std::error::Error>> {
-    let state = install_native(app)?;
+fn install(
+    app: &tauri::AppHandle, locale: Option<&str>, native_window: NativeWindow,
+) -> Result<ShellState, Box<dyn std::error::Error>> {
+    let state = match native_window {
+        NativeWindow::Shell => install_native(app)?,
+        NativeWindow::Host { native_backdrop } => host_state(app, native_backdrop),
+    };
     if let Some(locale) = locale {
         install_menu(app, locale)?;
     }
     Ok(state)
+}
+
+/// The state of an application that installed its own material and Atlas.
+fn host_state(app: &tauri::AppHandle, native_backdrop: bool) -> ShellState {
+    ShellState {
+        platform: std::env::consts::OS,
+        backdrop: if native_backdrop { "native" } else { "opaque" },
+        updates: updates_configured(app.config()),
+    }
 }
 
 /// Install material and Atlas once after the main window exists. Both plugin entry points call this.

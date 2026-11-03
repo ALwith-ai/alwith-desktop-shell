@@ -43,10 +43,16 @@ export async function checkForUpdates() {
   return invoke("plugin:alwith-desktop-shell|updater_check")
 }
 
-/** Installs the downloaded update and relaunches; resolves only on failure. */
-export async function installUpdateAndRelaunch() {
+/**
+ * Swaps the staged update into place and relaunches. With `expected` (the release the user
+ * confirmed) a different ready release is refused. Rejects with the reason when it cannot install.
+ */
+export async function installUpdateAndRelaunch(expected) {
   if (!isTauri()) throw new Error("Updates are only available in the desktop application")
-  await invoke("plugin:alwith-desktop-shell|updater_install_and_relaunch")
+  await invoke(
+    "plugin:alwith-desktop-shell|updater_install_and_relaunch",
+    expected ? { expected: { version: expected.version, signature: expected.signature } } : {}
+  )
 }
 
 /** The platform's confirmation dialog; `true` when the user chooses `ok`. */

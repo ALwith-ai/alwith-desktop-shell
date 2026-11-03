@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises"
 import { extname, join, resolve, sep } from "node:path"
 
@@ -26,21 +27,52 @@ export function validateConfig(value) {
   safePath("/app", c.icon)
   if (c.updates !== undefined) {
     if (!c.updates || typeof c.updates !== "object" || Array.isArray(c.updates))
-      throw Error("updates must be an object with github and pubkey")
-    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9_.-]{1,100}$/.test(c.updates.github ?? ""))
-      throw Error("updates.github must be a GitHub repository as owner/repo")
+      throw Error("updates must be an object with pubkey and github or endpoints")
+    const { github, endpoints, pubkey, requireSignedVersion } = c.updates
+    if (github === undefined && endpoints === undefined) throw Error("updates needs github or endpoints")
     if (
-      typeof c.updates.pubkey !== "string" ||
-      !/^[A-Za-z0-9+/]+=*$/.test(c.updates.pubkey.trim()) ||
-      c.updates.pubkey.trim().length < 64
+      github !== undefined &&
+      !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9_.-]{1,100}$/.test(
+        typeof github === "string" ? github : ""
+      )
     )
+      throw Error("updates.github must be a GitHub repository as owner/repo")
+    if (endpoints !== undefined) {
+      if (!Array.isArray(endpoints) || !endpoints.length)
+        throw Error("updates.endpoints must be a nonempty list of HTTPS URLs")
+      for (const endpoint of endpoints)
+        if (!httpsUrl(endpoint)) throw Error(`updates.endpoints: ${JSON.stringify(endpoint)} is not an HTTPS URL`)
+    }
+    if (typeof pubkey !== "string" || !/^[A-Za-z0-9+/]+=*$/.test(pubkey.trim()) || pubkey.trim().length < 64)
       throw Error("updates.pubkey must be the base64 public key written by the updater key generator")
+    if (requireSignedVersion !== undefined && typeof requireSignedVersion !== "boolean")
+      throw Error("updates.requireSignedVersion must be true or false")
   }
   return c
 }
 /** The static manifest tauri-plugin-updater reads; `releases/latest/download` always resolves to the newest published release. */
 export function updaterEndpoint(github) {
   return `https://github.com/${github}/releases/latest/download/latest.json`
+}
+/** An endpoint on any host; tauri-plugin-updater fills `{{target}}`, `{{arch}}`, `{{current_version}}` and `{{bundle_type}}`. */
+function httpsUrl(value) {
+  if (typeof value !== "string" || /\s/.test(value)) return !1
+  try {
+    const url = new URL(value)
+    return url.protocol === "https:" && !!url.hostname && !url.username && !url.password
+  } catch {
+    return !1
+  }
+}
+/** `plugins.updater` for an `updates` object: endpoints first, then the GitHub Releases manifest. */
+export function updaterConfig(updates) {
+  return {
+    pubkey: updates.pubkey.trim(),
+    endpoints: [...(updates.endpoints ?? []), ...(updates.github ? [updaterEndpoint(updates.github)] : [])],
+    requireSignedVersion: updates.requireSignedVersion ?? !0,
+    // The installer runs with a progress bar and no questions, then relaunches the app.
+    windows: { installMode: "passive" }
+  }
 }
 export function safePath(root, relative) {
   if (typeof relative !== "string" || !relative || relative.includes("\\") || relative.startsWith("/"))
@@ -94,7 +126,7 @@ export default ${JSON.stringify(`/${iconName}`)};
       beforeDevCommand: "bun run stage && bun run dev",
       beforeBuildCommand: "bun run stage && bun run build"
     },
-    // The asset protocol serves local skill icons and plugin screenshots from the Codex home (the toolbox), plus pet assets with auth.
+    // The asset protocol serves local skill icons and plugin screenshots from the Codex home (the toolbox), plus Vibemon assets with auth.
     app: {
       windows: [desktopWindow(c)],
       security: {
@@ -118,25 +150,27 @@ export default ${JSON.stringify(`/${iconName}`)};
     // Without `updates` no updater config exists and the generated app leaves tauri-plugin-updater unregistered.
     ...(c.updates
       ? {
-          plugins: {
-            updater: {
-              pubkey: c.updates.pubkey.trim(),
-              endpoints: [updaterEndpoint(c.updates.github)],
-              requireSignedVersion: !0
-            }
-          }
+          plugins: { updater: updaterConfig(c.updates) }
         }
       : {})
   }
   await writeFile(join(root, "src-tauri/tauri.conf.json"), json(config))
-  if (options.icons !== !1) {
-    if (
-      (await Bun.spawn(["bun", "run", "tauri", "icon", c.icon, "-o", "src-tauri/icons"], {
-        cwd: root,
-        stdout: "inherit",
-        stderr: "inherit"
-      }).exited) !== 0
-    )
-      throw Error("Icon generation failed")
-  }
+  if (options.icons !== !1) await generateIcons(root, c.icon)
+}
+async function generateIcons(root, icon) {
+  if (
+    (await Bun.spawn(["bun", "run", "tauri", "icon", icon, "-o", "src-tauri/icons"], {
+      cwd: root,
+      stdout: "inherit",
+      stderr: "inherit"
+    }).exited) !== 0
+  )
+    throw Error("Icon generation failed")
+}
+/** Generates the Tauri bundle icons from `alwith.app.json` when they are missing (a fresh project); existing icons stay. */
+export async function ensureIcons(root) {
+  const icons = ["32x32.png", "128x128.png", "128x128@2x.png", "icon.icns", "icon.ico"]
+  if (icons.every((name) => existsSync(join(root, "src-tauri/icons", name)))) return
+  const c = validateConfig(JSON.parse(await readFile(join(root, "alwith.app.json"), "utf8")))
+  await generateIcons(root, c.icon)
 }

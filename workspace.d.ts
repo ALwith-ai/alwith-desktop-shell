@@ -1,16 +1,30 @@
 import type { Context, ReactElement, ReactNode } from "react";
 import type { DesktopNavigationLabels } from "./react.js";
 export type DesktopScreen = "main" | "leading";
-export type DesktopCanvasRegion = "leading" | "chat" | "preview" | "trailing";
-export type DesktopWorkspaceLabels = DesktopNavigationLabels;
-export interface DesktopCanvasPreview {
-  /** The preview region is shown beside chat. */
-  open: boolean;
-  /** The preview fills the first screen and chat collapses. */
-  maximized: boolean;
-  /** Dragging the divider below the minimum preview width closes it. */
-  onOpenChange?: (open: boolean) => void;
+/**
+ * A canvas region (板, Desktop's `REGION` vocabulary): leading, trailing, or a pane named by its bare camelCase ID,
+ * as Desktop names `chat`, `preview`, `sidePanes` and `workbench`.
+ */
+export type DesktopCanvasRegion = "leading" | "trailing" | (string & {});
+/**
+ * A pane of the main screen. Panes are laid out in the order given: neighbours share a screen while both keep their
+ * minimum, otherwise the next one moves on to the following screen whole.
+ */
+export interface DesktopPane {
+  /** A unique camelCase ID other than `leading`, `navigation` and `trailing`; it is also the pane's region name. */
+  id: string;
+  title: string;
+  children: ReactNode;
+  /** Narrowest width while sharing a screen; 320 by default. */
+  min?: number;
+  /** Collapsed to no width; the content stays mounted. A pane without `hidden` cannot be hidden. */
+  hidden?: boolean;
+  /** Takes a whole screen of its own. */
+  maximized?: boolean;
+  /** Its start edge carries a divider; the dragged width is the pane's requested width until it is hidden or maximized. */
+  resizable?: boolean;
 }
+export type DesktopWorkspaceLabels = DesktopNavigationLabels;
 export interface DesktopCanvas {
   viewportWidth: number;
   /** The first screen's content width: the viewport less the docked navigation. */
@@ -19,10 +33,7 @@ export interface DesktopCanvas {
   region: DesktopCanvasRegion;
   trailingActive: boolean;
   moving: boolean;
-  /** Where the host portals its preview; null until the canvas mounts. */
-  previewSlot: HTMLElement | null;
-  setPreview: (preview: DesktopCanvasPreview) => void;
-  navigate: (region: "chat" | "preview" | "trailing") => void;
+  navigate: (region: Exclude<DesktopCanvasRegion, "leading">) => void;
 }
 export declare const DesktopCanvasContext: Context<DesktopCanvas | null>;
 export declare function useDesktopCanvas(): DesktopCanvas | null;
@@ -41,14 +52,15 @@ export declare function useWindowFullscreen(): boolean;
 /** The Windows title bar row above the workspace: app icon, sidebar toggle, extension toolbar, workspace controls. */
 export declare function DesktopWindowsShell(props: { icon: string; title: string; zoom?: number; enabled?: boolean; children: ReactNode }): ReactNode;
 /**
- * The desktop main window: a leading screen, the persistent navigation, a preview region the host fills through
- * `useDesktopCanvas().previewSlot`, chat, and an optional trailing station on ALwith Desktop's Atlas canvas.
- * Atlas owns grouping, snapping and every gutter. Hosts supply pages, not geometry.
+ * The desktop main window on ALwith Desktop's Atlas canvas: a leading screen, the persistent navigation, the
+ * main screen's panes, and an optional trailing station.
+ * Atlas owns grouping, snapping and every gutter. Hosts supply panes, not geometry.
  */
 export declare function DesktopWorkspace(props: {
   navigation: ReactNode;
   leading?: ReactNode;
-  children?: ReactNode;
+  /** The main screen's panes in canvas order, between leading and trailing. */
+  panes: DesktopPane[];
   trailing?: ReactNode;
   /** Workspace controls at the end of the title bar (portaled into the Windows title bar there). */
   toolbar?: ReactNode;
@@ -57,7 +69,7 @@ export declare function DesktopWorkspace(props: {
   overlays?: ReactNode;
   screen?: DesktopScreen;
   onScreenChange?: (screen: DesktopScreen) => void;
-  /** The region the canvas settled on (leading, chat, preview or trailing). */
+  /** The region the canvas settled on: leading, trailing or a pane ID. */
   onRegionChange?: (region: DesktopCanvasRegion) => void;
   initialNavigationPinned?: boolean;
   /** Persists the pin choice; calls are serialized so a rapid toggle cannot restore an older value. */

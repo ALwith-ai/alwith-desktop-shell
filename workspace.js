@@ -1,6 +1,6 @@
 import { jsx as jsx_w77yafs4, jsxs as jsxs_eh6c78nj } from "react/jsx-runtime";
 import { connectTrackpad, isViewportResize } from "@nyssance/atlas/dom";
-import { desktopDefaults, MIN_BLOCK_WIDTH, MIN_PREVIEW_WIDTH, resolveAtlasBlocks } from "@nyssance/atlas/layout";
+import { desktopDefaults, MIN_BLOCK_WIDTH, resolveAtlasBlocks } from "@nyssance/atlas/layout";
 import { useAtlas } from "@nyssance/atlas/react";
 import { attachWindowDrag, tauriTrackpad } from "@nyssance/atlas/tauri";
 import { getIdentifier } from "@tauri-apps/api/app";
@@ -25,6 +25,7 @@ import { connectDesktopOverview } from "./overview.js";
 import { desktopNavigationLabels } from "./status-labels.js";
 import { DesktopStatusBar } from "./status-item.js";
 import { DesktopUpdateStatus } from "./updates.js";
+const SHELL_REGIONS = ["leading", "navigation", "trailing"];
 const isMac = () => typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 const IS_WINDOWS = typeof navigator !== "undefined" && navigator.platform.includes("Win");
 export function useWindowFullscreen() {
@@ -144,17 +145,17 @@ export function useDesktopCanvas() {
   return useContext(DesktopCanvasContext);
 }
 export const DesktopNavigationOverlayContext = createContext(null);
-const REGION_PRIORITY = ["chat", "preview", "trailing", "leading"];
-function groupRegion(api, index) {
+function groupRegion(api, index, paneIds) {
   const geometry = api.getGeometry();
   const names = (geometry.groups[index] ?? []).filter((region) => (geometry.regions[region]?.offsetWidth ?? 0) > 0).map((region) => geometry.regions[region]?.dataset.atlasRegion);
-  return REGION_PRIORITY.find((name) => names.includes(name)) ?? "chat";
+  return paneIds.find((id) => names.includes(id)) ?? ["trailing", "leading"].find((name) => names.includes(name)) ?? paneIds[0];
 }
 function useWorkspaceCanvas({
   screen,
   pinned,
   onScreenChange,
   onRegionChange,
+  panes,
   trailing,
   direction,
   labels,
@@ -165,23 +166,23 @@ function useWorkspaceCanvas({
   const [initialDirection] = useState(direction);
   const root = useRef(null);
   const [viewportWidth, setViewportWidth] = useState(0);
-  const [preview, setPreviewState] = useState({ open: false, maximized: false });
-  const [previewWidth, setPreviewWidth] = useState(0);
-  const [previewSlot, setPreviewSlot] = useState(null);
-  const [region, setRegion] = useState(screen === "leading" ? "leading" : "chat");
+  const paneIds = panes.map((pane) => pane.id);
+  const first = panes.find((pane) => !pane.hidden)?.id ?? paneIds[0];
+  const [requested, setRequested] = useState({});
+  const [region, setRegion] = useState(screen === "leading" ? "leading" : first);
   const [moving, setMoving] = useState(false);
   const [peeking, setPeeking] = useState(false);
-  const [draggingPreview, setDraggingPreview] = useState(false);
+  const [dragging, setDragging] = useState(null);
   const divider = useRef(false);
   const pending = useRef(null);
-  const callbacks = useRef({ onScreenChange, onRegionChange, screen });
+  const callbacks = useRef({ onScreenChange, onRegionChange, screen, paneIds });
   useLayoutEffect(() => {
-    callbacks.current = { onScreenChange, onRegionChange, screen };
-  }, [onScreenChange, onRegionChange, screen]);
+    callbacks.current = { onScreenChange, onRegionChange, screen, paneIds };
+  });
   const statusbar = () => root.current?.closest("[data-main-screen]")?.querySelector(".main-window-statusbar") ?? null;
   const { ref: atlasRef, atlas: api } = useAtlas({
     direction: initialDirection,
-    initialRegion: screen === "leading" ? "leading" : "chat",
+    initialRegion: screen === "leading" ? "leading" : first,
     pagination: { container: statusbar, label: labels.pages, pageLabel: (index) => labels.page(index + 1) },
     overview: { footer: statusbar, label: labels.overview },
     manageInert: false,
@@ -217,19 +218,30 @@ function useWorkspaceCanvas({
   const blocks = resolveAtlasBlocks({
     screen: screenWidth,
     nextScreen: viewportWidth,
-    blocks: [
-      { name: "chat", min: MIN_BLOCK_WIDTH },
-      ...preview.open ? [{ name: "preview", min: MIN_PREVIEW_WIDTH, width: preview.maximized ? screenWidth : previewWidth }] : []
-    ]
+    blocks: panes.filter((pane) => !pane.hidden).map((pane) => ({
+      name: pane.id,
+      min: pane.min ?? MIN_BLOCK_WIDTH,
+      width: pane.maximized ? screenWidth : requested[pane.id]
+    }))
   });
-  const widths = { screen: screenWidth, chat: blocks.chat, preview: blocks.preview ?? 0 };
   const sizes = {
     leading: `calc(100% - ${pinned ? NAVIGATION_PEEK : NAVIGATION_WIDTH}px)`,
-    preview: widths.preview,
-    chat: widths.chat,
+    panes: Object.fromEntries(paneIds.map((id) => [id, blocks[id] ?? 0])),
     trailing: trailing ? desktopDefaults.trailingWidth : 0
   };
-  const geometryKey = `${viewportWidth}:${pinned}:${sizes.preview}:${sizes.chat}:${sizes.trailing}:${direction}`;
+  const geometryKey = `${viewportWidth}:${pinned}:${paneIds.map((id) => `${id}=${sizes.panes[id]}`).join(",")}:${sizes.trailing}:${direction}`;
+  const layoutKey = panes.map((pane) => `${pane.id}:${pane.hidden === true}:${pane.maximized === true}`).join(",");
+  const previousPanes = useRef(panes);
+  useLayoutEffect(() => {
+    const before = new Map(previousPanes.current.map((pane) => [pane.id, pane]));
+    previousPanes.current = panes;
+    const forget = panes.filter((pane) => pane.hidden || pane.maximized).map((pane) => pane.id);
+    if (forget.some((id) => (id in requested)))
+      setRequested((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !forget.includes(id))));
+    const changed = panes.find((pane) => !pane.hidden && before.has(pane.id) && !before.get(pane.id).maximized !== !pane.maximized);
+    if (changed)
+      pending.current = { region: changed.id, animate: true };
+  }, [layoutKey]);
   const settle = useCallback((next) => {
     setRegion(next);
     callbacks.current.onRegionChange?.(next);
@@ -243,10 +255,9 @@ function useWorkspaceCanvas({
       return;
     const geometry = api.getGeometry();
     const find = (name) => geometry.groups.findIndex((group) => group.some((item) => geometry.regions[item]?.dataset.atlasRegion === name && geometry.regions[item].offsetWidth > 0));
-    const fallback = target === "chat" ? "preview" : target === "preview" ? "chat" : null;
     let index = find(target);
-    if (index === -1 && fallback)
-      index = find(fallback);
+    if (index === -1 && callbacks.current.paneIds.includes(target))
+      index = callbacks.current.paneIds.map(find).find((candidate) => candidate !== -1) ?? -1;
     if (index === -1)
       return;
     api.cancelInput();
@@ -260,17 +271,17 @@ function useWorkspaceCanvas({
     api.refresh({ direction });
     const target = pending.current ?? { region, animate: false };
     pending.current = null;
-    show(target.region === "preview" && !preview.open ? "chat" : target.region, target.animate);
+    show(target.region, target.animate);
     if (!target.animate)
-      settle(groupRegion(api, api.getGeometry().selected));
-  }, [api, viewportWidth, geometryKey, direction, region, preview.open, show, settle]);
+      settle(groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds));
+  }, [api, viewportWidth, geometryKey, direction, region, show, settle]);
   useEffect(() => {
     if (!api)
       return;
     const stop = api.subscribe((state) => setMoving(state.moving));
     const settled = () => {
       setMoving(false);
-      settle(groupRegion(api, api.getGeometry().selected));
+      settle(groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds));
     };
     api.on("settle", settled);
     return () => {
@@ -284,56 +295,41 @@ function useWorkspaceCanvas({
     if (!api || previousScreen.current === screen)
       return;
     previousScreen.current = screen;
-    if (screen === "leading" === (groupRegion(api, api.getGeometry().selected) === "leading"))
+    if (screen === "leading" === (groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds) === "leading"))
       return;
-    show(screen === "leading" ? "leading" : "chat", true);
+    show(screen === "leading" ? "leading" : callbacks.current.paneIds[0], true);
   }, [api, screen, show]);
   const navigate = useCallback((target) => {
     pending.current = { region: target, animate: true };
     show(target, true);
   }, [show]);
-  const onPreviewOpenChange = useRef(undefined);
-  const setPreview = useCallback((next) => {
-    onPreviewOpenChange.current = next.onOpenChange;
-    setPreviewState((current) => {
-      if (current.open === next.open && current.maximized === next.maximized)
-        return current;
-      if (next.open && next.maximized !== current.maximized)
-        pending.current = { region: next.maximized ? "preview" : "chat", animate: true };
-      return next;
-    });
-    if (!next.open)
-      setPreviewWidth(0);
-  }, []);
   const dragStart = useRef(0);
   const divide = {
-    start: () => {
-      dragStart.current = widths.preview;
+    start: (id) => {
+      dragStart.current = sizes.panes[id] ?? 0;
       divider.current = true;
-      setDraggingPreview(true);
+      setDragging(id);
       api?.cancelInput();
     },
-    drag: (dx) => {
-      setPreviewWidth(Math.max(0, Math.min(widths.screen, dragStart.current - dx)));
+    drag: (id, dx) => {
+      setRequested((current) => ({ ...current, [id]: Math.max(0, Math.min(screenWidth, dragStart.current - dx)) }));
     },
     end: () => {
       divider.current = false;
-      setDraggingPreview(false);
+      setDragging(null);
       appliedKey.current = geometryKey;
       api?.refresh({ direction });
-      show(region === "preview" && !preview.open ? "chat" : region, false);
+      show(region, false);
     }
   };
   const context = useMemo(() => ({
     viewportWidth,
-    budget: widths.screen,
+    budget: screenWidth,
     region,
     trailingActive: region === "trailing",
     moving,
-    previewSlot,
-    setPreview,
     navigate
-  }), [viewportWidth, widths.screen, region, moving, previewSlot, setPreview, navigate]);
+  }), [viewportWidth, screenWidth, region, moving, navigate]);
   return {
     ref,
     sizes,
@@ -341,13 +337,11 @@ function useWorkspaceCanvas({
     region,
     moving,
     peeking,
-    preview,
-    draggingPreview,
-    divide,
-    setPreviewSlot
+    dragging,
+    divide
   };
 }
-function PreviewDivider({
+function PaneDivider({
   direction,
   onStart,
   onDrag,
@@ -445,7 +439,7 @@ const defaultLabels = () => desktopNavigationLabels(typeof navigator === "undefi
 export function DesktopWorkspace({
   navigation,
   leading,
-  children,
+  panes,
   trailing,
   toolbar,
   statusBar,
@@ -462,6 +456,10 @@ export function DesktopWorkspace({
   openLink,
   onError = console.error
 }) {
+  const paneIds = panes.map((pane) => pane.id);
+  if (paneIds.length === 0 || new Set(paneIds).size !== paneIds.length || paneIds.some((id) => !/^[a-z][a-zA-Z0-9]*$/.test(id) || SHELL_REGIONS.includes(id)))
+    throw new Error("Panes need unique camelCase IDs other than leading, navigation and trailing");
+  const first = panes.find((pane) => !pane.hidden)?.id ?? paneIds[0];
   const labels = { ...defaultLabels(), ...labelOverrides };
   const titlebar = useContext(DesktopTitleBarContext);
   const workspaceControls = useContext(DesktopWorkspaceControlsContext);
@@ -473,6 +471,7 @@ export function DesktopWorkspace({
     pinned,
     onScreenChange,
     onRegionChange,
+    panes,
     trailing: trailing !== undefined && trailing !== null && trailing !== false,
     direction,
     labels,
@@ -508,12 +507,12 @@ export function DesktopWorkspace({
   const changePinned = useCallback((next) => {
     if (!mainActive)
       return;
-    if (canvas.region !== "chat")
-      navigate("chat");
+    if (canvas.region !== first)
+      navigate(first);
     setPresentation("docked");
     setPinned(next);
     saving.current = saving.current.then(() => onNavigationPinnedChange?.(next)).catch(onError);
-  }, [mainActive, canvas.region, navigate, onNavigationPinnedChange, onError]);
+  }, [mainActive, canvas.region, first, navigate, onNavigationPinnedChange, onError]);
   useEffect(() => {
     if (canvas.peeking)
       setPresentation("floating");
@@ -538,7 +537,7 @@ export function DesktopWorkspace({
       "data-atlas-navigation-trigger": true,
       title: pinned ? labels.unpin : labels.pin,
       className: "text-sidebar-foreground",
-      onClick: () => docked && canvas.region !== "chat" ? navigate("chat") : changePinned(!docked),
+      onClick: () => docked && canvas.region !== first ? navigate(first) : changePinned(!docked),
       children: jsx_w77yafs4(ToggleIcon, {
         className: "size-4 rtl:-scale-x-100"
       })
@@ -635,37 +634,28 @@ export function DesktopWorkspace({
                       })
                     })
                   }),
-                  jsx_w77yafs4("div", {
-                    className: "main-screen-content",
-                    "data-screen-panel": "main",
-                    "data-atlas-region": "chat",
-                    "data-atlas-collapsed": canvas.sizes.chat === 0,
-                    style: { width: canvas.sizes.chat },
-                    inert: !mainActive,
-                    "aria-hidden": !mainActive,
-                    children
-                  }),
-                  jsxs_eh6c78nj("div", {
-                    className: "main-screen-preview",
-                    "data-screen-panel": "preview",
-                    "data-atlas-region": "preview",
-                    "data-atlas-collapsed": canvas.sizes.preview === 0,
-                    style: { width: canvas.sizes.preview },
-                    inert: !mainActive || !canvas.preview.open,
-                    "aria-hidden": !mainActive || !canvas.preview.open,
+                  panes.map((pane) => jsxs_eh6c78nj("div", {
+                    className: "main-screen-pane",
+                    "data-screen-panel": pane.id,
+                    "data-atlas-region": pane.id,
+                    "data-atlas-collapsed": canvas.sizes.panes[pane.id] === 0,
+                    "aria-label": pane.title,
+                    style: { width: canvas.sizes.panes[pane.id] },
+                    inert: !mainActive || pane.hidden,
+                    "aria-hidden": !mainActive || pane.hidden,
                     children: [
                       jsx_w77yafs4("div", {
-                        ref: canvas.setPreviewSlot,
-                        className: "main-screen-preview-slot"
+                        className: "main-screen-pane-body",
+                        children: pane.children
                       }),
-                      (canvas.draggingPreview || canvas.preview.open && !canvas.preview.maximized) && jsx_w77yafs4(PreviewDivider, {
+                      pane.resizable && (canvas.dragging === pane.id || !pane.hidden && !pane.maximized) && jsx_w77yafs4(PaneDivider, {
                         direction,
-                        onStart: canvas.divide.start,
-                        onDrag: canvas.divide.drag,
+                        onStart: () => canvas.divide.start(pane.id),
+                        onDrag: (dx) => canvas.divide.drag(pane.id, dx),
                         onEnd: canvas.divide.end
                       })
                     ]
-                  }),
+                  }, pane.id)),
                   jsx_w77yafs4("aside", {
                     className: "main-screen-trailing",
                     "data-screen-panel": "trailing",

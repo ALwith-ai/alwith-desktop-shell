@@ -29,6 +29,8 @@ The package includes the native SDK source and third-party notices. Windows devi
 
 An application with its own complete menu registers `tauri_plugin_alwith_desktop_shell::init_native()` instead of `init(locale)`. It gets the same commands, native materials and Atlas without the default menu. Keep menu construction and action routing in the application. Do not also call `atlas_tauri::install`.
 
+An application that installs its own window material and Atlas (ALwith Desktop) registers `init_with_options(locale, ShellOptions::new().host_native_window(native_backdrop))` instead, with `locale` `None` when it also owns the menu. The shell then calls neither `set_effects` nor `atlas_tauri::install` (Atlas refuses a second install) and reports `backdrop` as `"native"` when `native_backdrop` is true, `"opaque"` otherwise. `init`, `init_with`, `init_native` and `init_native_with` keep installing both.
+
 Applications without an Atlas page layout can import initialization and menu events from `/native`. That entry has no Atlas JavaScript dependency and does not impose navigation or sidebar markup. Native gesture installation remains part of the shell; only pages using an Atlas controller call connectDesktopAtlas.
 
 ## Brand configuration
@@ -37,11 +39,42 @@ Bun scripts import `configureProject` from `@alwith/module-desktop-shell/build`.
 
 The chat preset requires `chat` and `store`. Include `auth` in `modules` only for applications with ALwith account integration; native auth resources and pet asset permissions are omitted otherwise.
 
-## Updates through GitHub Releases
+## Staging module libraries
 
-An optional `updates` object turns on signed auto update: `{"github": "owner/repo", "pubkey": "<Tauri updater public key>"}`. `configureProject` then emits `plugins.updater` (the public key, the endpoint `https://github.com/owner/repo/releases/latest/download/latest.json` and `requireSignedVersion`) and `bundle.createUpdaterArtifacts`; without `updates` the configuration is unchanged.
+Bun staging scripts import `stageNativeModule` from `@alwith/module-desktop-shell/stage` to copy a module's private library into the application at build time. It runs only in Node/Bun, never in the webview.
 
-The generated application registers `tauri_plugin_updater::Builder::new().build()` only when `tauri_plugin_alwith_desktop_shell::updates_configured(context.config())` is true, because the plugin refuses a config without a public key. The shell runs ALwith Desktop's updater: it checks 30 seconds after launch and hourly, downloads a hit straight away, keeps a verified archive across restarts and drops it when the release changes. `DesktopNavigationFooter` shows the progress and relaunch card by default (pass `status` to replace it), and the main window asks once per downloaded version whether to relaunch. `useDesktopUpdater()` exposes the state, a manual `check()` and `confirmInstallAndRelaunch()` for settings pages; `getUpdaterState()`, `onUpdaterState()`, `checkForUpdates()` and `installUpdateAndRelaunch()` are the plain functions underneath. All are covered by `alwith-desktop-shell:default`; no `updater:*` permission is needed. The private key never enters the project: create-alwith writes it to `~/.tauri/<name>.key` and the release workflow reads it from the `TAURI_SIGNING_PRIVATE_KEY` secret.
+```js
+import { stageNativeModule } from "@alwith/module-desktop-shell/stage"
+const staged = stageNativeModule(import.meta.url, "editor", "aarch64-apple-darwin", nativeDirectory, licenses, contract)
+for (const file of staged) if (file.signing === "resign") await sign(file.path)
+```
+
+`stageNativeModule(from, module, target, destination, licenses, contract?)` resolves the installed `@alwith/module-<module>` package from `from` (usually the staging script's `import.meta.url`), takes its library for one Rust target, copies it (and the device helper, made executable) into `destination` and the licences into `<licenses>/alwith-native-<module>/`, and returns every staged file as `{ path, signing }`: `resign` for ALwith libraries and helpers, which the application signs with its own identity, `resource` for licence files. Any mismatch throws. Staged files are build output and must be Git-ignored.
+
+The artifact layout is the contract with alwith-modules, whose `scripts/lib/native-artifact.ts` validates the same fields before publication and additionally rejects unexpected files and implementation source in the directory. Each module package carries, per supported platform, `native/<os>-<cpu>/`:
+
+- `artifact.json`: `{ module, contract, abi, target, binary, sha256, helper? }`. `module` is the module identity (`editor`, `chat-network`, ...); `contract` the integer contract generation (at least 1, and equal to `contract` when the caller passes one); `abi` is `1`; `target` the Rust target of the directory; `binary` the library file name; `sha256` its hex SHA-256; `helper` (device on macOS only, and required there) is `{ binary: "alwith-device-helper", sha256, revision }` with a 40-character hex source revision.
+- The library, named `libalwith_native_<module>.dylib` (`darwin-arm64`, `aarch64-apple-darwin`), `alwith_native_<module>.dll` (`win32-x64`, `x86_64-pc-windows-msvc`) or `libalwith_native_<module>.so` (`linux-x64`, `x86_64-unknown-linux-gnu`, computer only), with `-` in the module replaced by `_`.
+- `THIRD_PARTY_NOTICES.md` and `licenses/`, staged with the package's `LICENSE`. Symlinks are rejected.
+
+The package's `package.json` `name` must be `@alwith/module-<module>`. A missing package, a missing platform directory, an unsupported target, a foreign identity, contract, ABI or file name, and a checksum mismatch each fail the build.
+
+## Updates
+
+An optional `updates` object turns on signed auto update: `{"pubkey": "<Tauri updater public key>", "github": "owner/repo"}`, or `endpoints` instead of (or before) `github` for any HTTPS host, such as a product-specific version service: `"endpoints": ["https://api.example.com/apps/my-app/update/{{target}}-{{arch}}/{{current_version}}"]` (the plugin fills `{{target}}`, `{{arch}}`, `{{current_version}}` and `{{bundle_type}}`). `requireSignedVersion` defaults to `true`. `configureProject` emits `plugins.updater` with the public key, the endpoints, `requireSignedVersion` and `windows.installMode: "passive"`; without `updates` the configuration is unchanged.
+
+The application registers `tauri_plugin_updater::Builder::new().build()` only when `tauri_plugin_alwith_desktop_shell::updates_configured(context.config())` is true: endpoints and a public key are both present, the same test the shell applies. The shell then runs the one standard updater of every ALwith desktop application:
+
+- It checks 30 seconds after launch and hourly, downloads a hit straight away (30 s check and 300 s download timeouts), writes the archive through a `.part` file, verifies it and stages it: on macOS the archive is extracted into a complete bundle in the updater cache. The state becomes `ready` only once the update is staged.
+- While an update is ready, its release identity is revalidated every five minutes (30 s timeout). A withdrawn or replaced release is discarded and the current one fetched at once.
+- The click asks no network. macOS renames the staged bundle into place on the same volume (an atomic exchange where APFS allows it; otherwise two renames with rollback) and falls back to the plugin's own privileged replacement when the install location is not writable or on another volume. Windows launches the verified installer immediately. The application then restarts through `request_restart()`, so its `RunEvent` cleanup runs. The log records the time from click to restart.
+- A staged update survives restarts: at launch its archive is verified again against the cached release manifest (signature and signed version), staged again and revalidated.
+- One lock serialises checking, downloading, revalidation, recovery and installation. The shell stops the updater itself on exit.
+- The updater stays `disabled` without endpoints or public key, when the cache directory is unavailable, and in debug builds.
+
+Rust options go through `init_with(locale, options)` or `init_native_with(options)` with `UpdaterOptions::new()`: `.install_window("main")` restricts installation to one window, `.enable_in_debug(true)` opts a debug build in, and on Windows `.on_before_exit(|app| ..)` runs before the installer replaces the application (stop child processes; the plugin otherwise calls `cleanup_before_exit`) with `.on_failed_install(|app| ..)` restoring what it stopped when the installer then fails to start. `.on_before_exit_async(timeout, |app| Box::pin(async move { .. }))` runs on every platform after the click claimed the update and before it goes into place (the macOS bundle swap, the Windows installer launch), for an ordered asynchronous shutdown such as draining Drive; the hook returns `Result<(), String>` (`updater::BoxFuture`). It is awaited at most `timeout`: an error or a timeout aborts the install explicitly (the update stays ready and the click returns the error) and `on_failed_install` runs. `on_failed_install` runs at most once per attempt, whether the asynchronous hook, the Windows hook or both ran before the failure. On Windows `on_before_exit` still runs afterwards, right before the installer starts. Pass all options through `ShellOptions::new().updater(..)` with `init_with_options` when the native window is the host's too.
+
+`DesktopNavigationFooter` shows the progress and relaunch card by default (pass `status` to replace it), and the main window asks once per ready version whether to relaunch. `useDesktopUpdater()` is the headless hook for an application's own card, dialog or rail: `state`, `busy`, `error`, `prompt`, `status` (the label for checking, downloading, staging, ready, up to date or disabled), `check()`, `install()`, `confirmInstallAndRelaunch()`, `requestInstall()` and `dismiss()`. `configureDesktopUpdater({ prepare, finishPreparation, onStateChange, dialog })` sets per-window hooks: `prepare` runs after confirmation and before installation (save work, close admission); the release is checked again after it, and a different one is refused; `finishPreparation(installed)` always follows; `onStateChange(state, previous)` sees every change; `dialog: "custom"` sets `prompt` for the application's dialog instead of the platform question. Install failures are surfaced as `error`. `getUpdaterState()`, `onUpdaterState()`, `checkForUpdates()` and `installUpdateAndRelaunch(expected?)` are the plain functions underneath. All are covered by `alwith-desktop-shell:default`; no `updater:*` permission is needed. The private key never enters the project: create-alwith writes it to `~/.tauri/<name>.key` and the release workflow reads it from the `TAURI_SIGNING_PRIVATE_KEY` secret.
 
 Local application builds do not create signed updater archives or require an updater private key. Release workflows opt in with `tauri build --config '{"bundle":{"createUpdaterArtifacts":true}}'` and supply their signing key. The public updater endpoint remains configured in the application.
 
@@ -57,13 +90,17 @@ the main window until React mounts. Add it to `plugins` in `vite.config.ts` and 
 ## Main window
 
 `DesktopWorkspace` (`./react`) is ALwith U's main window, the one implementation every app shares: a
-leading screen, the persistent navigation, the main screen (`children`, optionally a preview after chat)
-and an optional `trailing` station on one Atlas canvas. Hosts supply pages; the shell owns geometry,
-gestures, pagination, the overview and the window chrome.
+leading screen, the persistent navigation, the main screen's `panes` and an optional `trailing` station on
+one Atlas canvas. Hosts supply panes; the shell owns geometry, gestures, pagination, the overview and the
+window chrome.
 
-- `screen` (`"main" | "leading"`) and `onScreenChange` select the screen; `useDesktopCanvas()` gives pages
-  inside the workspace the canvas (`navigate("chat" | "preview" | "trailing")`, `trailingActive`,
-  `setWorkspace` for a chat/preview split, `setDividerDragging`).
+- `panes` are laid out in the order given; each pane's `id` is also its region name (U passes `chat`, then
+  `preview`). Neighbours share a screen while both keep their `min` (320 by default), otherwise the next one
+  moves on to the following screen whole. `hidden` collapses a pane to no width and keeps its content mounted;
+  a pane without it cannot be hidden. `maximized` gives a pane a whole screen, and `resizable` puts a divider
+  on its start edge.
+- `screen` (`"main" | "leading"`) and `onScreenChange` select the screen; `useDesktopCanvas()` gives content
+  inside the workspace the canvas (`navigate(paneId | "trailing")`, `region`, `trailingActive`, `budget`).
 - `initialNavigationPinned` and `onNavigationPinnedChange` drive the pin toggle after the native window
   controls (80px in on macOS outside fullscreen, 8px elsewhere). Unpinned, the navigation hides and floats
   back in from the start edge. The host persists the choice; calls are serialized. The root carries

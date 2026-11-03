@@ -7,7 +7,7 @@ export { DesktopStatusBar, DesktopStatusItem, type DesktopStatusItemProps } from
 export declare function DesktopLeading(props: { navigation: ReactNode; children?: ReactNode }): ReactNode;
 export { LeadingNavigation, type LeadingNavigationItem, type LeadingNavigationProps } from "./leading-navigation.js";
 export declare function desktopSettingsLabels(language: string): { title: string; general: string; appearance: string; about: string; account: string; theme: string; themeLight: string; themeDark: string; themeSystem: string; language: string; versionLabel: string; engine: string; codexVersion: string; updates: string };
-export interface DesktopUpdateLabels { downloading: string; installing: string; install: string; relaunchTitle: string; relaunchDescription: string; relaunchNow: string; relaunchLater: string }
+export interface DesktopUpdateLabels { downloading: string; installing: string; install: string; relaunchTitle: string; relaunchDescription: string; relaunchNow: string; relaunchLater: string; checking: string; disabled: string; disabledDebugBuild?: string; upToDate: string; staging: string; ready: string; checkNow: string; changed: string }
 export declare function desktopUpdateLabels(language: string): DesktopUpdateLabels;
 export * from "./updates.js";
 export * from "./workspace.js";

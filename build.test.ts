@@ -8,7 +8,7 @@ import { configureProject } from "./build.js"
 interface TauriConfig {
   bundle: { resources: Record<string, string>; createUpdaterArtifacts?: boolean }
   app: { security: { assetProtocol: { scope: string[] } } }
-  plugins?: Record<string, unknown>
+  plugins?: { updater?: { endpoints?: string[] } & Record<string, unknown> }
 }
 function readTauriConfig(root: string) {
   return readFile(join(root, "src-tauri/tauri.conf.json"), "utf8").then((text) => JSON.parse(text) as TauriConfig)
@@ -61,7 +61,7 @@ test("brand configuration preserves user pages and uses a valid binary name", as
   }
 })
 
-test("updates emit the GitHub Releases updater config and stay absent otherwise", async () => {
+test("updates emit the GitHub Releases or endpoint updater config and stay absent otherwise", async () => {
   const root = await mkdtemp(join(tmpdir(), "shell-updates-"))
   try {
     await mkdir(join(root, "src-tauri"))
@@ -101,14 +101,43 @@ test("updates emit the GitHub Releases updater config and stay absent otherwise"
       updater: {
         pubkey,
         endpoints: ["https://github.com/example/my-app/releases/latest/download/latest.json"],
-        requireSignedVersion: true
+        requireSignedVersion: true,
+        windows: { installMode: "passive" }
       }
     })
     expect(updating.bundle.createUpdaterArtifacts).toBeUndefined()
+    const productEndpoint =
+      "https://api.example.com/service/api/v1/open-source-versions/my-app/update/{{target}}-{{arch}}/{{current_version}}"
+    await writeFile(
+      join(root, "alwith.app.json"),
+      JSON.stringify({ ...config, updates: { endpoints: [productEndpoint], pubkey, requireSignedVersion: false } })
+    )
+    await configureProject(root, { icons: false })
+    expect((await readTauriConfig(root)).plugins?.updater).toEqual({
+      pubkey,
+      endpoints: [productEndpoint],
+      requireSignedVersion: false,
+      windows: { installMode: "passive" }
+    })
+    await writeFile(
+      join(root, "alwith.app.json"),
+      JSON.stringify({ ...config, updates: { github: "example/my-app", endpoints: [productEndpoint], pubkey } })
+    )
+    await configureProject(root, { icons: false })
+    expect((await readTauriConfig(root)).plugins?.updater?.endpoints).toEqual([
+      productEndpoint,
+      "https://github.com/example/my-app/releases/latest/download/latest.json"
+    ])
     for (const updates of [
       { github: "not-a-repo", pubkey },
       { github: "example/my-app", pubkey: "short" },
       { github: "example/my-app" },
+      { pubkey },
+      { endpoints: [], pubkey },
+      { endpoints: ["http://example.com/latest.json"], pubkey },
+      { endpoints: ["not a url"], pubkey },
+      { endpoints: "https://example.com/latest.json", pubkey },
+      { github: "example/my-app", pubkey, requireSignedVersion: "yes" },
       "example/my-app"
     ]) {
       await writeFile(join(root, "alwith.app.json"), JSON.stringify({ ...config, updates }))

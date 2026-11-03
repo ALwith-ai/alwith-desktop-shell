@@ -1,5 +1,5 @@
 import { type AtlasController, connectTrackpad, isViewportResize } from "@nyssance/atlas/dom"
-import { desktopDefaults, MIN_BLOCK_WIDTH, MIN_PREVIEW_WIDTH, resolveAtlasBlocks } from "@nyssance/atlas/layout"
+import { desktopDefaults, MIN_BLOCK_WIDTH, resolveAtlasBlocks } from "@nyssance/atlas/layout"
 import { useAtlas } from "@nyssance/atlas/react"
 import { attachWindowDrag, tauriTrackpad } from "@nyssance/atlas/tauri"
 import { getIdentifier } from "@tauri-apps/api/app"
@@ -31,7 +31,30 @@ import { DesktopStatusBar } from "./status-item.js"
 import { DesktopUpdateStatus } from "./updates.js"
 
 export type DesktopScreen = "main" | "leading"
-export type DesktopCanvasRegion = "leading" | "chat" | "preview" | "trailing"
+/**
+ * A canvas region (板, Desktop's `REGION` vocabulary): leading, trailing, or a pane named by its bare camelCase ID,
+ * as Desktop names `chat`, `preview`, `sidePanes` and `workbench`.
+ */
+export type DesktopCanvasRegion = "leading" | "trailing" | (string & {})
+/**
+ * A pane of the main screen. Panes are laid out in the order given: neighbours share a screen while both keep their
+ * minimum, otherwise the next one moves on to the following screen whole.
+ */
+export interface DesktopPane {
+  /** A unique camelCase ID other than `leading`, `navigation` and `trailing`; it is also the pane's region name. */
+  id: string
+  title: string
+  children: ReactNode
+  /** Narrowest width while sharing a screen; 320 by default. */
+  min?: number
+  /** Collapsed to no width; the content stays mounted. A pane without `hidden` cannot be hidden. */
+  hidden?: boolean
+  /** Takes a whole screen of its own. */
+  maximized?: boolean
+  /** Its start edge carries a divider; the dragged width is the pane's requested width until it is hidden or maximized. */
+  resizable?: boolean
+}
+const SHELL_REGIONS: readonly string[] = ["leading", "navigation", "trailing"]
 
 export interface DesktopWorkspaceLabels {
   pin: string
@@ -156,14 +179,6 @@ const NAVIGATION_WIDTH = desktopDefaults.navigationWidth
 // Atlas group the docked navigation with the leading screen instead of the first content screen.
 const NAVIGATION_PEEK = NAVIGATION_WIDTH - desktopDefaults.gutter
 
-export interface DesktopCanvasPreview {
-  /** The preview region is shown beside chat. */
-  open: boolean
-  /** The preview fills the first screen and chat collapses. */
-  maximized: boolean
-  /** Dragging the divider below the minimum preview width closes it. */
-  onOpenChange?: (open: boolean) => void
-}
 export interface DesktopCanvas {
   viewportWidth: number
   /** The first screen's content width: the viewport less the docked navigation. */
@@ -172,10 +187,7 @@ export interface DesktopCanvas {
   region: DesktopCanvasRegion
   trailingActive: boolean
   moving: boolean
-  /** Where the host portals its preview; null until the canvas mounts. */
-  previewSlot: HTMLElement | null
-  setPreview: (preview: DesktopCanvasPreview) => void
-  navigate: (region: "chat" | "preview" | "trailing") => void
+  navigate: (region: Exclude<DesktopCanvasRegion, "leading">) => void
 }
 export const DesktopCanvasContext = createContext<DesktopCanvas | null>(null)
 export function useDesktopCanvas(): DesktopCanvas | null {
@@ -185,14 +197,18 @@ export function useDesktopCanvas(): DesktopCanvas | null {
 /** Portaled menus opened from the navigation retain its floating surface until they close. */
 export const DesktopNavigationOverlayContext = createContext<(() => () => void) | null>(null)
 
-const REGION_PRIORITY: DesktopCanvasRegion[] = ["chat", "preview", "trailing", "leading"]
-function groupRegion(api: AtlasController, index: number): DesktopCanvasRegion {
+/** The region a screen shows: its first pane in canvas order, else trailing, else leading. */
+function groupRegion(api: AtlasController, index: number, paneIds: readonly string[]): DesktopCanvasRegion {
   const geometry = api.getGeometry()
-  // A region collapsed to nothing (a closed preview) is never the foreground.
+  // A region collapsed to nothing (a hidden pane) is never the foreground.
   const names = (geometry.groups[index] ?? [])
     .filter((region) => (geometry.regions[region]?.offsetWidth ?? 0) > 0)
     .map((region) => geometry.regions[region]?.dataset.atlasRegion)
-  return REGION_PRIORITY.find((name) => names.includes(name)) ?? "chat"
+  return (
+    paneIds.find((id) => names.includes(id)) ??
+    (["trailing", "leading"] as const).find((name) => names.includes(name)) ??
+    paneIds[0]!
+  )
 }
 
 /** ALwith Desktop's Atlas canvas: Atlas owns snapping, grouping and every gutter. */
@@ -201,6 +217,7 @@ function useWorkspaceCanvas({
   pinned,
   onScreenChange,
   onRegionChange,
+  panes,
   trailing,
   direction,
   labels,
@@ -212,6 +229,7 @@ function useWorkspaceCanvas({
   pinned: boolean
   onScreenChange?: (screen: DesktopScreen) => void
   onRegionChange?: (region: DesktopCanvasRegion) => void
+  panes: readonly DesktopPane[]
   trailing: boolean
   direction: "ltr" | "rtl"
   labels: DesktopWorkspaceLabels
@@ -222,24 +240,26 @@ function useWorkspaceCanvas({
   const [initialDirection] = useState(direction)
   const root = useRef<HTMLDivElement | null>(null)
   const [viewportWidth, setViewportWidth] = useState(0)
-  const [preview, setPreviewState] = useState<DesktopCanvasPreview>({ open: false, maximized: false })
-  const [previewWidth, setPreviewWidth] = useState(0)
-  const [previewSlot, setPreviewSlot] = useState<HTMLElement | null>(null)
-  const [region, setRegion] = useState<DesktopCanvasRegion>(screen === "leading" ? "leading" : "chat")
+  const paneIds = panes.map((pane) => pane.id)
+  // The main screen starts on the first screen after the navigation.
+  const first = panes.find((pane) => !pane.hidden)?.id ?? paneIds[0]!
+  // Widths the user dragged resizable panes to, by pane ID.
+  const [requested, setRequested] = useState<Record<string, number>>({})
+  const [region, setRegion] = useState<DesktopCanvasRegion>(screen === "leading" ? "leading" : first)
   const [moving, setMoving] = useState(false)
   const [peeking, setPeeking] = useState(false)
-  const [draggingPreview, setDraggingPreview] = useState(false)
+  const [dragging, setDragging] = useState<string | null>(null)
   const divider = useRef(false)
   const pending = useRef<{ region: DesktopCanvasRegion; animate: boolean } | null>(null)
-  const callbacks = useRef({ onScreenChange, onRegionChange, screen })
+  const callbacks = useRef({ onScreenChange, onRegionChange, screen, paneIds })
   useLayoutEffect(() => {
-    callbacks.current = { onScreenChange, onRegionChange, screen }
-  }, [onScreenChange, onRegionChange, screen])
+    callbacks.current = { onScreenChange, onRegionChange, screen, paneIds }
+  })
   const statusbar = () =>
     root.current?.closest("[data-main-screen]")?.querySelector<HTMLElement>(".main-window-statusbar") ?? null
   const { ref: atlasRef, atlas: api } = useAtlas({
     direction: initialDirection,
-    initialRegion: screen === "leading" ? "leading" : "chat",
+    initialRegion: screen === "leading" ? "leading" : first,
     pagination: { container: statusbar, label: labels.pages, pageLabel: (index: number) => labels.page(index + 1) },
     overview: { footer: statusbar, label: labels.overview },
     manageInert: false,
@@ -272,27 +292,41 @@ function useWorkspaceCanvas({
     if (api) setViewportWidth(api.root.clientWidth)
   }, [api])
 
-  // The main screen's blocks in order: chat, then the preview. Maximized, the preview asks for a whole screen, which
-  // leaves no room beside chat, so it takes the next screen to the right and chat keeps the first.
+  // The main screen's blocks in the host's order. A maximized pane asks for a whole screen, which leaves no room beside
+  // its neighbour, so it takes a screen of its own.
   const screenWidth = Math.max(0, viewportWidth - (pinned ? NAVIGATION_WIDTH : 0))
   const blocks = resolveAtlasBlocks({
     screen: screenWidth,
     nextScreen: viewportWidth,
-    blocks: [
-      { name: "chat" as const, min: MIN_BLOCK_WIDTH },
-      ...(preview.open
-        ? [{ name: "preview" as const, min: MIN_PREVIEW_WIDTH, width: preview.maximized ? screenWidth : previewWidth }]
-        : [])
-    ]
+    blocks: panes
+      .filter((pane) => !pane.hidden)
+      .map((pane) => ({
+        name: pane.id,
+        min: pane.min ?? MIN_BLOCK_WIDTH,
+        width: pane.maximized ? screenWidth : requested[pane.id]
+      }))
   })
-  const widths = { screen: screenWidth, chat: blocks.chat, preview: blocks.preview ?? 0 }
   const sizes = {
     leading: `calc(100% - ${pinned ? NAVIGATION_PEEK : NAVIGATION_WIDTH}px)`,
-    preview: widths.preview,
-    chat: widths.chat,
+    panes: Object.fromEntries(paneIds.map((id) => [id, blocks[id] ?? 0])) as Record<string, number>,
     trailing: trailing ? desktopDefaults.trailingWidth : 0
   }
-  const geometryKey = `${viewportWidth}:${pinned}:${sizes.preview}:${sizes.chat}:${sizes.trailing}:${direction}`
+  const geometryKey = `${viewportWidth}:${pinned}:${paneIds.map((id) => `${id}=${sizes.panes[id]}`).join(",")}:${sizes.trailing}:${direction}`
+
+  // A hidden or maximized pane forgets its dragged width; maximizing moves to the pane's own screen and restoring
+  // returns to the screen it shares.
+  const layoutKey = panes.map((pane) => `${pane.id}:${pane.hidden === true}:${pane.maximized === true}`).join(",")
+  const previousPanes = useRef(panes)
+  useLayoutEffect(() => {
+    const before = new Map(previousPanes.current.map((pane) => [pane.id, pane]))
+    previousPanes.current = panes
+    const forget = panes.filter((pane) => pane.hidden || pane.maximized).map((pane) => pane.id)
+    if (forget.some((id) => id in requested))
+      setRequested((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !forget.includes(id))))
+    const changed = panes.find((pane) => !pane.hidden && before.has(pane.id) && !before.get(pane.id)!.maximized !== !pane.maximized)
+    if (changed) pending.current = { region: changed.id, animate: true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutKey])
 
   const settle = useCallback((next: DesktopCanvasRegion) => {
     setRegion(next)
@@ -311,10 +345,10 @@ function useWorkspaceCanvas({
             (item) => geometry.regions[item]?.dataset.atlasRegion === name && geometry.regions[item]!.offsetWidth > 0
           )
         )
-      // A closed preview has no width, so the main screen falls back to chat (and the reverse).
-      const fallback = target === "chat" ? "preview" : target === "preview" ? "chat" : null
+      // A hidden pane has no width, so a pane target falls back to the first pane on screen.
       let index = find(target)
-      if (index === -1 && fallback) index = find(fallback)
+      if (index === -1 && callbacks.current.paneIds.includes(target))
+        index = callbacks.current.paneIds.map(find).find((candidate) => candidate !== -1) ?? -1
       if (index === -1) return
       api.cancelInput()
       api.goToSnap(index, { instant: !animate || reduced() })
@@ -330,17 +364,17 @@ function useWorkspaceCanvas({
     api.refresh({ direction })
     const target = pending.current ?? { region, animate: false }
     pending.current = null
-    show(target.region === "preview" && !preview.open ? "chat" : target.region, target.animate)
+    show(target.region, target.animate)
     // Collapsing or restoring a region can change the foreground without moving the canvas.
-    if (!target.animate) settle(groupRegion(api, api.getGeometry().selected))
-  }, [api, viewportWidth, geometryKey, direction, region, preview.open, show, settle])
+    if (!target.animate) settle(groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds))
+  }, [api, viewportWidth, geometryKey, direction, region, show, settle])
 
   useEffect(() => {
     if (!api) return
     const stop = api.subscribe((state: { moving: boolean }) => setMoving(state.moving))
     const settled = (): void => {
       setMoving(false)
-      settle(groupRegion(api, api.getGeometry().selected))
+      settle(groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds))
     }
     api.on("settle", settled)
     return () => {
@@ -356,65 +390,50 @@ function useWorkspaceCanvas({
   useEffect(() => {
     if (!api || previousScreen.current === screen) return
     previousScreen.current = screen
-    if ((screen === "leading") === (groupRegion(api, api.getGeometry().selected) === "leading")) return
-    show(screen === "leading" ? "leading" : "chat", true)
+    if ((screen === "leading") === (groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds) === "leading")) return
+    show(screen === "leading" ? "leading" : callbacks.current.paneIds[0]!, true)
   }, [api, screen, show])
 
   const navigate = useCallback(
-    (target: "chat" | "preview" | "trailing"): void => {
+    (target: Exclude<DesktopCanvasRegion, "leading">): void => {
       pending.current = { region: target, animate: true }
       show(target, true)
     },
     [show]
   )
-  const onPreviewOpenChange = useRef<DesktopCanvasPreview["onOpenChange"]>(undefined)
-  const setPreview = useCallback((next: DesktopCanvasPreview): void => {
-    onPreviewOpenChange.current = next.onOpenChange
-    setPreviewState((current) => {
-      if (current.open === next.open && current.maximized === next.maximized) return current
-      // Maximizing moves to the preview's own screen; restoring returns to chat beside it.
-      if (next.open && next.maximized !== current.maximized)
-        pending.current = { region: next.maximized ? "preview" : "chat", animate: true }
-      return next
-    })
-    if (!next.open) setPreviewWidth(0)
-  }, [])
-
-  // The preview sits after chat, as ALwith Desktop's file and device panels do; its start edge carries the only divider.
+  // A resizable pane's start edge carries the divider, as ALwith Desktop's preview does.
   const dragStart = useRef(0)
   const divide = {
-    start: (): void => {
-      dragStart.current = widths.preview
+    start: (id: string): void => {
+      dragStart.current = sizes.panes[id] ?? 0
       divider.current = true
-      setDraggingPreview(true)
+      setDragging(id)
       api?.cancelInput()
     },
-    drag: (dx: number): void => {
-      // Narrower than its minimum, or wide enough to squeeze chat, the preview moves to the next screen.
-      setPreviewWidth(Math.max(0, Math.min(widths.screen, dragStart.current - dx)))
+    drag: (id: string, dx: number): void => {
+      // Narrower than its minimum, or wide enough to squeeze its neighbour, the pane moves to the next screen.
+      setRequested((current) => ({ ...current, [id]: Math.max(0, Math.min(screenWidth, dragStart.current - dx)) }))
     },
     end: (): void => {
       divider.current = false
-      setDraggingPreview(false)
+      setDragging(null)
       // Widths followed the pointer without rebuilding; regroup once on release, as ALwith Desktop does.
       appliedKey.current = geometryKey
       api?.refresh({ direction })
-      show(region === "preview" && !preview.open ? "chat" : region, false)
+      show(region, false)
     }
   }
 
   const context = useMemo<DesktopCanvas>(
     () => ({
       viewportWidth,
-      budget: widths.screen,
+      budget: screenWidth,
       region,
       trailingActive: region === "trailing",
       moving,
-      previewSlot,
-      setPreview,
       navigate
     }),
-    [viewportWidth, widths.screen, region, moving, previewSlot, setPreview, navigate]
+    [viewportWidth, screenWidth, region, moving, navigate]
   )
   return {
     ref,
@@ -423,14 +442,12 @@ function useWorkspaceCanvas({
     region,
     moving,
     peeking,
-    preview,
-    draggingPreview,
-    divide,
-    setPreviewSlot
+    dragging,
+    divide
   }
 }
 
-function PreviewDivider({
+function PaneDivider({
   direction,
   onStart,
   onDrag,
@@ -554,13 +571,13 @@ const defaultLabels = (): DesktopWorkspaceLabels =>
 
 /**
  * The desktop main window on ALwith Desktop's Atlas canvas: a leading screen, the persistent navigation, a
- * preview region the host fills through `useDesktopCanvas().previewSlot`, chat, and an optional trailing station.
- * Atlas owns grouping, snapping and every gutter. Hosts supply pages, not geometry.
+ * main screen's panes, and an optional trailing station.
+ * Atlas owns grouping, snapping and every gutter. Hosts supply panes, not geometry.
  */
 export function DesktopWorkspace({
   navigation,
   leading,
-  children,
+  panes,
   trailing,
   toolbar,
   statusBar,
@@ -579,7 +596,8 @@ export function DesktopWorkspace({
 }: {
   navigation: ReactNode
   leading?: ReactNode
-  children?: ReactNode
+  /** The main screen's panes in canvas order, between leading and trailing. */
+  panes: DesktopPane[]
   trailing?: ReactNode
   toolbar?: ReactNode
   statusBar?: ReactNode
@@ -596,6 +614,17 @@ export function DesktopWorkspace({
   openLink?: (url: string) => void
   onError?: (error: unknown) => void
 }): ReactElement {
+  const paneIds = panes.map((pane) => pane.id)
+  if (
+    paneIds.length === 0 ||
+    new Set(paneIds).size !== paneIds.length ||
+    paneIds.some((id) => !/^[a-z][a-zA-Z0-9]*$/.test(id) || SHELL_REGIONS.includes(id))
+  )
+    throw new Error(
+      "Panes need unique camelCase IDs other than leading, navigation and trailing"
+    )
+  // The navigation docks beside the first screen after it: the first pane that is not hidden.
+  const first = panes.find((pane) => !pane.hidden)?.id ?? paneIds[0]!
   const labels = { ...defaultLabels(), ...labelOverrides }
   const titlebar = useContext(DesktopTitleBarContext)
   const workspaceControls = useContext(DesktopWorkspaceControlsContext)
@@ -609,6 +638,7 @@ export function DesktopWorkspace({
     pinned,
     onScreenChange,
     onRegionChange,
+    panes,
     trailing: trailing !== undefined && trailing !== null && trailing !== false,
     direction,
     labels,
@@ -648,15 +678,15 @@ export function DesktopWorkspace({
   const changePinned = useCallback(
     (next: boolean) => {
       if (!mainActive) return
-      // The navigation lives on chat's screen, so toggling it from another screen (the trailing station or a
-      // maximized preview) also returns there.
-      if (canvas.region !== "chat") navigate("chat")
+      // The navigation docks beside the first screen, so toggling it from another screen (the trailing station or
+      // a maximized pane) also returns there.
+      if (canvas.region !== first) navigate(first)
       setPresentation("docked")
       setPinned(next)
       // Serialize writes so rapid toggles cannot restore an older choice on restart.
       saving.current = saving.current.then(() => onNavigationPinnedChange?.(next)).catch(onError)
     },
-    [mainActive, canvas.region, navigate, onNavigationPinnedChange, onError]
+    [mainActive, canvas.region, first, navigate, onNavigationPinnedChange, onError]
   )
 
   useEffect(() => {
@@ -687,7 +717,7 @@ export function DesktopWorkspace({
         className="text-sidebar-foreground"
         // The navigation closes only while it is on screen; docked on chat's screen while another is shown, the button
         // returns to it instead.
-        onClick={() => (docked && canvas.region !== "chat" ? navigate("chat") : changePinned(!docked))}
+        onClick={() => (docked && canvas.region !== first ? navigate(first) : changePinned(!docked))}
       >
         <ToggleIcon className="size-4 rtl:-scale-x-100" />
       </Button>
@@ -760,36 +790,29 @@ export function DesktopWorkspace({
                   </div>
                 </div>
               </DesktopNavigationOverlayContext.Provider>
-              <div
-                className="main-screen-content"
-                data-screen-panel="main"
-                data-atlas-region="chat"
-                data-atlas-collapsed={canvas.sizes.chat === 0}
-                style={{ width: canvas.sizes.chat }}
-                inert={!mainActive}
-                aria-hidden={!mainActive}
-              >
-                {children}
-              </div>
-              <div
-                className="main-screen-preview"
-                data-screen-panel="preview"
-                data-atlas-region="preview"
-                data-atlas-collapsed={canvas.sizes.preview === 0}
-                style={{ width: canvas.sizes.preview }}
-                inert={!mainActive || !canvas.preview.open}
-                aria-hidden={!mainActive || !canvas.preview.open}
-              >
-                <div ref={canvas.setPreviewSlot} className="main-screen-preview-slot" />
-                {(canvas.draggingPreview || (canvas.preview.open && !canvas.preview.maximized)) && (
-                  <PreviewDivider
-                    direction={direction}
-                    onStart={canvas.divide.start}
-                    onDrag={canvas.divide.drag}
-                    onEnd={canvas.divide.end}
-                  />
-                )}
-              </div>
+              {panes.map((pane) => (
+                <div
+                  key={pane.id}
+                  className="main-screen-pane"
+                  data-screen-panel={pane.id}
+                  data-atlas-region={pane.id}
+                  data-atlas-collapsed={canvas.sizes.panes[pane.id] === 0}
+                  aria-label={pane.title}
+                  style={{ width: canvas.sizes.panes[pane.id] }}
+                  inert={!mainActive || pane.hidden}
+                  aria-hidden={!mainActive || pane.hidden}
+                >
+                  <div className="main-screen-pane-body">{pane.children}</div>
+                  {pane.resizable && (canvas.dragging === pane.id || (!pane.hidden && !pane.maximized)) && (
+                    <PaneDivider
+                      direction={direction}
+                      onStart={() => canvas.divide.start(pane.id)}
+                      onDrag={(dx) => canvas.divide.drag(pane.id, dx)}
+                      onEnd={canvas.divide.end}
+                    />
+                  )}
+                </div>
+              ))}
               <aside
                 className="main-screen-trailing"
                 data-screen-panel="trailing"

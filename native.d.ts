@@ -2,8 +2,8 @@ export interface DesktopShellState { platform: "macos" | "windows" | "linux" | "
 export interface DesktopUpdate { version: string; filename: string; signature: string; contentLength: number | null }
 export type DesktopUpdaterState =
   | { type: "uninitialized" | "idle" | "checkingForUpdates" }
-  | { type: "disabled"; reason: "invalidConfiguration" }
-  | { type: "availableForDownload" | "ready" | "restarting"; update: DesktopUpdate }
+  | { type: "disabled"; reason: "invalidConfiguration" | "debugBuild" | "cacheUnavailable" }
+  | { type: "availableForDownload" | "staging" | "ready" | "restarting"; update: DesktopUpdate }
   | { type: "downloading"; update: DesktopUpdate; downloadedBytes: number | null; totalBytes: number | null }
 export declare function initializeDesktopShell(): Promise<DesktopShellState>;
 export declare function onDesktopNewChat(handler: () => void): Promise<() => void>;
@@ -12,7 +12,7 @@ export declare function onDesktopMenu(action: DesktopMenuAction, handler: () => 
 export declare function getUpdaterState(): Promise<DesktopUpdaterState>;
 export declare function onUpdaterState(handler: (state: DesktopUpdaterState) => void): Promise<() => void>;
 export declare function checkForUpdates(): Promise<DesktopUpdaterState>;
-export declare function installUpdateAndRelaunch(): Promise<void>;
+export declare function installUpdateAndRelaunch(expected?: Pick<DesktopUpdate, "version" | "signature">): Promise<void>;
 export declare function confirmDialog(options: { title: string; message: string; ok: string; cancel: string }): Promise<boolean>;
 export declare function chooseFolder(defaultPath?: string | null): Promise<string | null>;
 export interface DesktopSettingsWindowOptions {

@@ -17,6 +17,6 @@ export function DesktopHeader({ title, status, error, children }) {
 
 export { DesktopStatusBar, DesktopStatusItem } from "./status-item.js"
 export { desktopNavigationLabels, desktopSettingsLabels, desktopUpdateLabels } from "./status-labels.js"
-export { useDesktopUpdater, DesktopUpdateStatus } from "./updates.js"
+export { useDesktopUpdater, DesktopUpdateStatus, configureDesktopUpdater, createDesktopUpdater, desktopUpdateStatusText } from "./updates.js"
 export { LeadingNavigation }
 export { DesktopWorkspace, DesktopWindowsShell, DesktopCanvasContext, DesktopNavigationFooter, DesktopNavigationOverlayContext, DesktopTitleBarContext, DesktopWorkspaceControlsContext, DesktopExtensionControlsContext, useDesktopCanvas, useWindowFullscreen } from "./workspace.js"
