@@ -33,6 +33,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "alwith-desktop-shell"
+version = "0.6.0"
+dependencies = [
+ "atlas-tauri",
+ "flate2",
+ "libc",
+ "log",
+ "rfd",
+ "semver",
+ "serde",
+ "serde_json",
+ "tar",
+ "tauri",
+ "tauri-plugin",
+ "tauri-plugin-updater",
+ "tokio",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3078,25 +3097,6 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
-]
-
-[[package]]
-name = "tauri-plugin-alwith-desktop-shell"
-version = "0.6.0"
-dependencies = [
- "atlas-tauri",
- "flate2",
- "libc",
- "log",
- "rfd",
- "semver",
- "serde",
- "serde_json",
- "tar",
- "tauri",
- "tauri-plugin",
- "tauri-plugin-updater",
- "tokio",
 ]
 
 [[package]]

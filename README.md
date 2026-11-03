@@ -6,7 +6,7 @@ This package owns native behavior and its JS bridge. The generated shell block o
 
 ## Install in a generated application
 
-Use the published npm package with a caret version; never link a maintainer checkout. In Cargo, depend on `tauri-plugin-alwith-desktop-shell` at `../node_modules/@alwith/module-desktop-shell/rust`. Register `.plugin(tauri_plugin_alwith_desktop_shell::init("en"))` and grant `alwith-desktop-shell:default` to the main window. Main-window configuration comes from `desktopWindow(appConfig)` in `@alwith/module-desktop-shell/config`.
+Use the published npm package with a caret version; never link a maintainer checkout. In Cargo, depend on `alwith-desktop-shell = "0.6"` from crates.io. Register `.plugin(alwith_desktop_shell::init("en"))` and grant `alwith-desktop-shell:default` to the main window. Main-window configuration comes from `desktopWindow(appConfig)` in `@alwith/module-desktop-shell/config`.
 
 Import styles.css after theme styles. Await `initializeDesktopShell()` before rendering; retain opaque defaults if initialization fails. Use `.desktop-shell`, `.desktop-shell-navigation` and `.desktop-shell-workspace` in the default block. Connect Atlas with `connectDesktopAtlas(controller)` and dispose the returned function on replacement/unmount. Subscribe to `onDesktopNewChat` only while the authenticated chat page is mounted, disposing the returned listener on unmount (including asynchronous registration races).
 
@@ -27,7 +27,7 @@ The package includes the native SDK source and third-party notices. Windows devi
 
 ## Replacing the complete menu
 
-An application with its own complete menu registers `tauri_plugin_alwith_desktop_shell::init_native()` instead of `init(locale)`. It gets the same commands, native materials and Atlas without the default menu. Keep menu construction and action routing in the application. Do not also call `atlas_tauri::install`.
+An application with its own complete menu registers `alwith_desktop_shell::init_native()` instead of `init(locale)`. It gets the same commands, native materials and Atlas without the default menu. Keep menu construction and action routing in the application. Do not also call `atlas_tauri::install`.
 
 An application that installs its own window material and Atlas (ALwith Desktop) registers `init_with_options(locale, ShellOptions::new().host_native_window(native_backdrop))` instead, with `locale` `None` when it also owns the menu. The shell then calls neither `set_effects` nor `atlas_tauri::install` (Atlas refuses a second install) and reports `backdrop` as `"native"` when `native_backdrop` is true, `"opaque"` otherwise. `init`, `init_with`, `init_native` and `init_native_with` keep installing both.
 
@@ -63,7 +63,7 @@ The package's `package.json` `name` must be `@alwith/module-<module>`. A missing
 
 An optional `updates` object turns on signed auto update: `{"pubkey": "<Tauri updater public key>", "github": "owner/repo"}`, or `endpoints` instead of (or before) `github` for any HTTPS host, such as a product-specific version service: `"endpoints": ["https://api.example.com/apps/my-app/update/{{target}}-{{arch}}/{{current_version}}"]` (the plugin fills `{{target}}`, `{{arch}}`, `{{current_version}}` and `{{bundle_type}}`). `requireSignedVersion` defaults to `true`. `configureProject` emits `plugins.updater` with the public key, the endpoints, `requireSignedVersion` and `windows.installMode: "passive"`; without `updates` the configuration is unchanged.
 
-The application registers `tauri_plugin_updater::Builder::new().build()` only when `tauri_plugin_alwith_desktop_shell::updates_configured(context.config())` is true: endpoints and a public key are both present, the same test the shell applies. The shell then runs the one standard updater of every ALwith desktop application:
+The application registers `tauri_plugin_updater::Builder::new().build()` only when `alwith_desktop_shell::updates_configured(context.config())` is true: endpoints and a public key are both present, the same test the shell applies. The shell then runs the one standard updater of every ALwith desktop application:
 
 - It checks 30 seconds after launch and hourly, downloads a hit straight away (30 s check and 300 s download timeouts), writes the archive through a `.part` file, verifies it and stages it: on macOS the archive is extracted into a complete bundle in the updater cache. The state becomes `ready` only once the update is staged.
 - While an update is ready, its release identity is revalidated every five minutes (30 s timeout). A withdrawn or replaced release is discarded and the current one fetched at once.
