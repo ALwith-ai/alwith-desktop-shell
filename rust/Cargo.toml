@@ -7,7 +7,7 @@ license = "AGPL-3.0-only"
 license-file = "../LICENSE"
 description = "Default native desktop shell for ALwith applications: menus, window chrome, CLI status and signed application updates"
 repository = "https://github.com/ALwith-ai/alwith-desktop-shell"
-include = ["Cargo.toml", "build.rs", "src/**/*.rs", "permissions/**/*"]
+include = ["/Cargo.toml", "/build.rs", "src/**/*.rs", "permissions/**/*"]
 readme = false
 [workspace]
 [build-dependencies]
