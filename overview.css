@@ -1,0 +1,59 @@
+@font-face {
+  font-family: "ALwith Caveat";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("./assets/Caveat.woff2") format("woff2-variations");
+}
+[data-shell-overview-brand] {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 30;
+  transform: translateY(-50%);
+  pointer-events: none;
+  user-select: none;
+  text-align: center;
+  white-space: nowrap;
+  font-family: "ALwith Caveat", cursive;
+  font-size: 48px;
+  line-height: 1;
+  color: var(--foreground, currentColor);
+}
+[data-shell-overview-brand] > span {
+  color: var(--alwith-violet, #7c3aed);
+}
+[data-shell-overview-social] {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 30;
+  transform: translateY(-50%);
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+}
+[data-shell-overview-social] > a {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  color: var(--muted-foreground, #737373);
+  text-decoration: none;
+  pointer-events: auto;
+}
+[data-shell-overview-social] svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+[data-shell-overview-social] > a:hover {
+  color: var(--shell-social-brand);
+}
+.dark [data-shell-overview-social] > a:hover {
+  color: var(--shell-social-brand-dark);
+}
+[data-shell-overview-social] > a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

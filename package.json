@@ -1,0 +1,147 @@
+{
+  "name": "@alwith/module-desktop-shell",
+  "version": "0.5.24",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "config.js",
+    "config.d.ts",
+    "styles.css",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "rust/Cargo.toml",
+    "rust/Cargo.lock",
+    "rust/build.rs",
+    "rust/src",
+    "rust/permissions",
+    "native.js",
+    "native.d.ts",
+    "build.js",
+    "build.d.ts",
+    "theme.css",
+    "react.js",
+    "react.d.ts",
+    "tailwind.css",
+    "overview.js",
+    "overview.d.ts",
+    "overview.css",
+    "status-item.js",
+    "status-item.d.ts",
+    "assets",
+    "licenses",
+    "status-labels.js",
+    "campaigns.js",
+    "vite.js",
+    "vite.d.ts",
+    "campaigns.d.ts",
+    "leading-navigation.js",
+    "leading-navigation.d.ts",
+    "settings.js",
+    "settings.d.ts",
+    "settings.css",
+    "theme.js",
+    "theme.d.ts",
+    "updates.js",
+    "updates.d.ts",
+    "workspace.js",
+    "workspace.d.ts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./config": {
+      "types": "./config.d.ts",
+      "import": "./config.js"
+    },
+    "./styles.css": "./styles.css",
+    "./native": {
+      "types": "./native.d.ts",
+      "import": "./native.js"
+    },
+    "./build": {
+      "types": "./build.d.ts",
+      "import": "./build.js"
+    },
+    "./theme.css": "./theme.css",
+    "./react": {
+      "types": "./react.d.ts",
+      "import": "./react.js"
+    },
+    "./tailwind.css": "./tailwind.css",
+    "./vite": {
+      "types": "./vite.d.ts",
+      "import": "./vite.js"
+    },
+    "./overview": {
+      "types": "./overview.d.ts",
+      "import": "./overview.js"
+    },
+    "./overview.css": "./overview.css",
+    "./status-item": {
+      "types": "./status-item.d.ts",
+      "import": "./status-item.js"
+    },
+    "./leading-navigation": {
+      "types": "./leading-navigation.d.ts",
+      "import": "./leading-navigation.js"
+    },
+    "./settings": {
+      "types": "./settings.d.ts",
+      "import": "./settings.js"
+    },
+    "./settings.css": "./settings.css",
+    "./theme": {
+      "types": "./theme.d.ts",
+      "import": "./theme.js"
+    }
+  },
+  "sideEffects": [
+    "*.css"
+  ],
+  "peerDependencies": {
+    "@tauri-apps/api": "^3.0.0-alpha.3",
+    "@nyssance/atlas": "^0.1.11",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "scripts": {
+    "build": "bun build-ui.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "prepack": "bun run build && bun test"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ALwith-ai/alwith-desktop-shell.git"
+  },
+  "devDependencies": {
+    "@nyssance/atlas": "^0.1.11",
+    "@tauri-apps/api": "3.0.0-alpha.3",
+    "@types/bun": "^1.4.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2"
+  },
+  "peerDependenciesMeta": {
+    "@nyssance/atlas": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.9.0",
+    "@nyssance/shadcn": "^4.23.4",
+    "cn": "^0.5.2",
+    "lucide-react": "^1.66.0",
+    "class-variance-authority": "^0.7.1"
+  }
+}

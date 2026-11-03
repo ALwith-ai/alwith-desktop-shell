@@ -1,0 +1,98 @@
+/* U's settings window: section rows and the right column's row geometry. */
+.settings-window [class~="group/navigation-row"] {
+  column-gap: 0.5rem;
+}
+
+.settings-content {
+  --settings-control-width: min(18rem, 60%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* Desktop settings keep the same control typography below the mobile breakpoint. */
+.settings-content :is(input, textarea, select) {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.settings-row {
+  display: flex;
+  min-width: 0;
+  min-height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-row:has(.settings-row-description) {
+  align-items: start;
+}
+
+.settings-row-label > :first-child {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+}
+
+.settings-row-control {
+  min-height: 30px;
+}
+
+.settings-content .settings-group:first-child > .settings-row:first-child {
+  min-height: 0;
+  padding-block-start: 0;
+}
+
+.settings-content > :first-child > :first-child:is(h1, h2, h3),
+.settings-content > :first-child > :first-child > :first-child:is(h1, h2, h3) {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+}
+
+.settings-row-aligned {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, var(--settings-control-width));
+}
+
+.settings-row-control {
+  display: flex;
+  min-width: 0;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.settings-row-aligned > .settings-row-control {
+  display: block;
+}
+
+.settings-row-aligned:has(> .settings-row-control > [data-slot="switch"]) {
+  display: flex;
+}
+
+.settings-row-aligned > .settings-row-control:has(> [data-slot="switch"]) {
+  display: flex;
+  width: auto;
+}
+
+.settings-row-description {
+  overflow-wrap: anywhere;
+}
+
+/* Shared modules and extension SDK settings inherit the same host typography and spacing. */
+.settings-content :where(h1, h2, h3, h4) {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.5;
+}

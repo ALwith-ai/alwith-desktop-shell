@@ -1,0 +1,24 @@
+[fmt]
+printWidth = 120
+semi = false
+trailingComma = "none"
+sortImports = true
+sortTailwindcss = true
+ignorePatterns = [
+  "bun.lock",
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/target/**",
+  "**/licenses/**",
+  "**/bin/**",
+  "**/*.svg",
+  "**/*.md",
+  "**/*.html",
+  "**/package.json",
+  "**/*.toml",
+  "package.json",
+]
+
+
+[run]
+bun = true

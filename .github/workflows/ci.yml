@@ -1,0 +1,42 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+  # The native plugin compiles per platform; only Rust changes need it.
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: filter
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then base=${{ github.event.pull_request.base.sha }}; else base=${{ github.event.before }}; fi
+          if git diff --name-only "$base" HEAD 2>/dev/null | grep -qE '^(rust/|\.github/workflows/ci\.yml)'; then echo rust=true; else echo rust=false; fi >> "$GITHUB_OUTPUT"
+  native:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --locked --manifest-path rust/Cargo.toml

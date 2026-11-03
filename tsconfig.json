@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": [
+      "bun"
+    ],
+    "paths": {
+      "@/*": [
+        "./node_modules/@nyssance/shadcn/dist/vega/*"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "*.ts"
+  ]
+}

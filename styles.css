@@ -1,0 +1,393 @@
+/* Atlas owns the canvas layout and its gutters. */
+@import "@nyssance/atlas/styles.css";
+/* Complete default surfaces; replace the shell block to choose another design. */
+html[data-desktop-backdrop="native"],
+html[data-desktop-backdrop="native"] body,
+html[data-desktop-backdrop="native"] #root {
+  background: transparent;
+}
+.desktop-shell-navigation {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  color: var(--sidebar-foreground);
+}
+@media (prefers-reduced-transparency: reduce) {
+  html[data-desktop-backdrop="native"] body {
+    background: var(--background);
+  }
+}
+
+/* A single compact header for U and the default chat block. */
+.desktop-shell-chat-header {
+  container-type: inline-size;
+  position: relative;
+  display: flex;
+  min-height: 40px;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  padding-inline: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.desktop-shell-navigation {
+  --navigation-row-height: 30px;
+  --spacing: 4px;
+}
+/* Host chrome shares one hover overlay (U's `.main-sidebar-panel` rule): ghost buttons and composed triggers in the
+   navigation column hover with the same 8% foreground wash as the rows, instead of the solid button background. */
+.desktop-shell-navigation :is([class~="group/button"], .chrome-hover):hover {
+  background-color: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+.desktop-shell-navigation-header,
+.desktop-shell-navigation-footer {
+  flex-shrink: 0;
+  padding: 4px 0;
+}
+/* Footer status, the campaign slot and the footer rows sit 4px apart, as in ALwith Desktop. */
+.desktop-shell-navigation-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.desktop-shell-brand {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 4px;
+  font-size: 14px;
+}
+.desktop-shell-navigation-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  padding-inline: 0;
+}
+.desktop-shell-navigation-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.desktop-shell-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 500;
+}
+.desktop-shell-status {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.desktop-shell-error {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--destructive);
+}
+
+.desktop-shell-settings {
+  height: 100%;
+  padding-top: 32px;
+}
+
+.desktop-shell-settings-page {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+.desktop-shell-settings-content {
+  display: flex;
+  width: 100%;
+  max-width: 672px;
+  margin-inline: auto;
+  flex-direction: column;
+  gap: 24px;
+  overflow-y: auto;
+  padding: 24px;
+}
+.desktop-shell-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* The runtime status sits at the inline end of the workspace's status bar. */
+.desktop-shell-runtime-status {
+  margin-inline-start: auto;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  -webkit-app-region: no-drag;
+}
+.desktop-shell-runtime-status > button:hover {
+  background: var(--accent);
+}
+[data-atlas-overview] .desktop-shell-runtime-status {
+  visibility: hidden;
+}
+
+/* The leading screen (U's `.main-screen-leading`): the 48px rail, then the page it selected. */
+.desktop-shell-leading {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.desktop-shell-leading-page {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.leading-navigation {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 48px;
+  padding-block: 12px;
+  padding-inline-end: 4px;
+  overflow: hidden;
+}
+
+/* ---- DesktopWorkspace: the main window canvas (moved from ALwith U) ---- */
+:root {
+  --sidebar-floating-shadow: oklch(0 0 0 / 16%);
+  --main-surface-gutter: var(--atlas-gutter, 4px);
+  --main-surface-border-width: 1px;
+  --native-viewport-width: 100vw;
+  /* The renderer updates 100vw with native page zoom; no React/IPC timing participates in compensation. */
+  --window-zoom-correction: calc(100vw / var(--native-viewport-width));
+  --chrome-hover-background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+.dark {
+  --sidebar-floating-shadow: oklch(0 0 0 / 32%);
+}
+/* Stabilize contrast over Windows Acrylic while retaining the native backdrop texture. */
+html[data-window-backdrop="acrylic"] body {
+  background-color: color-mix(in srgb, var(--sidebar) 60%, transparent);
+}
+html[data-window-backdrop="acrylic"] {
+  --tauri-plugin-decoration-z-index: 60;
+}
+/* The native recovery frame already supplies its own title bar. */
+html[data-window-backdrop="acrylic"]:not(:has([data-tauri-plugin-decoration-active])) .windows-main-titlebar {
+  display: none;
+}
+html[data-window-backdrop="acrylic"] [data-tauri-plugin-decoration-root] [data-tauri-decoration-control] {
+  width: calc(46px / var(--main-window-zoom, 1));
+  min-width: 0;
+  height: var(--tauri-plugin-decoration-titlebar-height, 32px);
+  color: var(--foreground);
+}
+html[data-window-backdrop="acrylic"] [data-tauri-plugin-decoration-root] [data-tauri-decoration-control]:hover,
+html[data-window-backdrop="acrylic"] [data-tauri-plugin-decoration-root] [data-tauri-decoration-hover] {
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+html[data-window-backdrop="acrylic"] [data-tauri-plugin-decoration-root] [data-tauri-decoration-control="close"]:hover,
+html[data-window-backdrop="acrylic"]
+  [data-tauri-plugin-decoration-root]
+  [data-tauri-decoration-control="close"][data-tauri-decoration-hover] {
+  color: var(--primary-foreground);
+  background: var(--destructive);
+}
+/* Login and startup screens share the space below the custom title bar. */
+.windows-main-content > :first-child {
+  height: 100%;
+}
+/* Native vibrancy shows through around the persistent navigation and main panel. */
+[data-slot="sidebar-wrapper"] {
+  background-color: transparent;
+}
+[data-slot="sidebar"] {
+  background-color: transparent;
+}
+/* Floating navigation gets its own surface when it overlays chat, keeping content readable. */
+[data-sidebar-mode="floating"] [data-slot="sidebar"] {
+  background-color: var(--background);
+}
+[data-slot="sidebar-inner"],
+[data-slot="sidebar-inner"] > div {
+  background-color: transparent;
+}
+
+/* Window chrome owns full-width rows; only the middle row participates in screen layout. */
+.main-window-titlebar {
+  flex: none;
+  -webkit-app-region: drag;
+}
+.windows-main-content .main-window-titlebar {
+  display: none;
+}
+.main-window-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: clip;
+}
+/* Atlas owns the canvas: a 4px outer margin and 4px inside every region, so every surface, the
+   navigation and the window edge sit 8px apart. Nothing here adds horizontal spacing. */
+.main-canvas-viewport {
+  height: 100%;
+}
+.main-window-statusbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 12px 4px;
+  -webkit-app-region: no-drag;
+}
+/* The rounded page surface inside each region; it relies on neither borders nor shadows. */
+.main-chat-surface {
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--main-surface-radius);
+  background-color: var(--background);
+  box-shadow: none;
+}
+[data-sidebar-presentation] {
+  --sidebar-resize-duration: 200ms;
+  --sidebar-fade-duration: 150ms;
+  --screen-slide-duration: 240ms;
+}
+.main-screen-leading,
+.main-screen-preview,
+.main-screen-content,
+.main-screen-trailing {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: clip;
+}
+/* The leading screen: the host's rail, then its page surface. */
+.main-screen-leading {
+  flex-direction: row;
+}
+.main-screen-leading > .main-chat-surface {
+  flex: 1;
+}
+.main-screen-content > *,
+.main-screen-preview-slot > * {
+  flex: 1;
+}
+.main-screen-preview {
+  position: relative;
+  overflow: visible;
+}
+.main-screen-preview-slot {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: clip;
+}
+/* The canvas's only divider rides the preview's end edge. */
+.desktop-shell-divider {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  z-index: 10;
+  width: 2px;
+  translate: -50% 0;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.desktop-shell-divider:dir(rtl) {
+  translate: 50% 0;
+}
+.desktop-shell-divider:hover {
+  background-color: var(--ring);
+}
+.main-sidebar-shell {
+  z-index: 30;
+}
+.main-sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+/* The host's navigation fills the column above ALwith's campaign slot. */
+.main-sidebar-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.desktop-shell-campaigns {
+  flex: none;
+}
+
+.main-sidebar-toggle {
+  --spacing: 4px;
+  --radius: 10px;
+  position: absolute;
+  display: flex;
+  top: 0;
+  left: var(--sidebar-toggle-left);
+  z-index: 31;
+}
+.windows-sidebar-toggle {
+  display: flex;
+  align-items: center;
+}
+.windows-sidebar-toggle [data-slot="button"] {
+  transform: scale(calc(1 / var(--main-window-zoom, 1)));
+  transform-origin: top left;
+}
+/* Pin/preview state is conveyed by ARIA; only pointer hover paints this control. */
+.main-sidebar-toggle [data-slot="button"],
+.windows-sidebar-toggle [data-slot="button"] {
+  background-color: transparent;
+}
+.windows-extension-controls [role="toolbar"] {
+  width: calc(100% * var(--main-window-zoom, 1));
+  zoom: calc(1 / var(--main-window-zoom, 1));
+}
+.windows-extension-controls [data-extension-alignment] {
+  -webkit-app-region: no-drag;
+}
+/* Window chrome shares one hover overlay; composed triggers keep the shadcn button class. */
+.main-sidebar-panel :is([class~="group/button"], .chrome-hover):hover,
+.leading-navigation [class~="group/button"]:hover,
+.main-sidebar-toggle [data-slot="button"]:hover,
+.windows-sidebar-toggle [data-slot="button"]:hover,
+.windows-extension-controls button:hover,
+.main-window-statusbar button:not([data-atlas-footer-navigation] button):is(:hover, [aria-expanded="true"]) {
+  background-color: var(--chrome-hover-background);
+}
+.main-sidebar-panel [role="tablist"] [role="tab"]:enabled:hover {
+  background-color: transparent;
+  background-image: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .main-sidebar-shell {
+    transition: none;
+  }
+}
