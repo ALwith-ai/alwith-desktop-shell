@@ -164,4 +164,5 @@ Copyright 2026 ALWITHAI PTE. LTD. Licensed under the GNU Affero General Public L
 applications that cannot meet the AGPL's terms. Third-party material keeps its own licenses, listed in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Contributions are accepted under a contributor license agreement so the project can stay dual-licensed.
+Contributions are accepted under the [contributor license agreement](CLA.md) so the project can stay
+dual-licensed; the CLA bot asks for a signature on your first pull request.
