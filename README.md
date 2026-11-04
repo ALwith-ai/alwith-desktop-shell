@@ -203,3 +203,9 @@ applications that cannot meet the AGPL's terms. Third-party material keeps its o
 
 Contributions are accepted under the [contributor license agreement](CLA.md) so the project can stay
 dual-licensed; the CLA bot asks for a signature on your first pull request.
+
+## Default component libraries
+
+The shell includes `@nyssance/shadcn` and `@nyssance/reui` as runtime dependencies, even before a page uses ReUI. UI builds map `@/components/reui/*` to ReUI and the remaining registry aliases to shadcn.
+
+Generated applications declare both libraries directly because their editable pages consume them. Use the single `reui({ style: "vega" })` Vite plugin from `@nyssance/reui/vite`: local source overrides are checked first, followed by ReUI and shadcn. TypeScript paths and Tailwind source scanning must include both packages; create-alwith supplies this wiring by default.

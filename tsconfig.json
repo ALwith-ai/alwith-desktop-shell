@@ -9,6 +9,7 @@
     ],
     "paths": {
       "@/*": [
+        "./node_modules/@nyssance/reui/dist/vega/*",
         "./node_modules/@nyssance/shadcn/dist/vega/*"
       ]
     }
