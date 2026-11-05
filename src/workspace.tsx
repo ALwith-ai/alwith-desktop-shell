@@ -19,7 +19,7 @@ import {
   useRef,
   useState
 } from "react"
-import { createPortal } from "react-dom"
+import { createPortal, flushSync } from "react-dom"
 
 import { Button } from "@/components/ui/button"
 import { SidebarProvider } from "@/components/ui/sidebar"
@@ -198,13 +198,19 @@ export function useDesktopCanvas(): DesktopCanvas | null {
 export const DesktopNavigationOverlayContext = createContext<(() => () => void) | null>(null)
 
 /** The region a screen shows: its first pane in canvas order, else trailing, else leading. */
-function groupRegion(api: AtlasController, index: number, paneIds: readonly string[]): DesktopCanvasRegion {
+function groupRegion(
+  api: AtlasController,
+  index: number,
+  paneIds: readonly string[],
+  preferred?: string | null
+): DesktopCanvasRegion {
   const geometry = api.getGeometry()
   // A region collapsed to nothing (a hidden pane) is never the foreground.
   const names = (geometry.groups[index] ?? [])
     .filter((region) => (geometry.regions[region]?.offsetWidth ?? 0) > 0)
     .map((region) => geometry.regions[region]?.dataset.atlasRegion)
   return (
+    (preferred && names.includes(preferred) ? preferred : undefined) ??
     paneIds.find((id) => names.includes(id)) ??
     (["trailing", "leading"] as const).find((name) => names.includes(name)) ??
     paneIds[0]!
@@ -251,30 +257,37 @@ function useWorkspaceCanvas({
   const [dragging, setDragging] = useState<string | null>(null)
   const divider = useRef(false)
   const pending = useRef<{ region: DesktopCanvasRegion; animate: boolean } | null>(null)
-  const callbacks = useRef({ onScreenChange, onRegionChange, screen, paneIds })
+  const callbacks = useRef({ onScreenChange, onRegionChange, screen, paneIds, region })
   useLayoutEffect(() => {
-    callbacks.current = { onScreenChange, onRegionChange, screen, paneIds }
+    callbacks.current = { onScreenChange, onRegionChange, screen, paneIds, region }
   })
-  const statusbar = () =>
-    root.current?.closest("[data-main-screen]")?.querySelector<HTMLElement>(".main-window-statusbar") ?? null
-  const { ref: atlasRef, atlas: api } = useAtlas({
-    direction: initialDirection,
-    initialRegion: screen === "leading" ? "leading" : first,
-    pagination: { container: statusbar, label: labels.pages, pageLabel: (index: number) => labels.page(index + 1) },
-    overview: { footer: statusbar, label: labels.overview },
-    manageInert: false,
-    navigationPinned: pinned,
-    hoverNavigation: screen === "main",
-    navigationWidth: NAVIGATION_WIDTH,
-    onNavigationChange: setPeeking,
-    flickMinIndex: pinned ? 1 : 0,
-    trackpadEnabled: trackpad,
-    blocked: () => divider.current,
-    watchResize: (node, entries) => {
-      if (divider.current || !isViewportResize(node, entries)) return
-      setViewportWidth(node.clientWidth)
-    }
-  })
+  const statusbar = useCallback(
+    () => root.current?.closest("[data-main-screen]")?.querySelector<HTMLElement>(".main-window-statusbar") ?? null,
+    []
+  )
+  const { ref: atlasRef, atlas: api } = useAtlas(
+    useMemo(
+      () => ({
+        direction: initialDirection,
+        initialRegion: screen === "leading" ? "leading" : first,
+        pagination: { container: statusbar, label: labels.pages, pageLabel: (index: number) => labels.page(index + 1) },
+        overview: { footer: statusbar, label: labels.overview },
+        manageInert: false,
+        navigationPinned: pinned,
+        hoverNavigation: screen === "main",
+        navigationWidth: NAVIGATION_WIDTH,
+        onNavigationChange: setPeeking,
+        flickMinIndex: pinned ? 1 : 0,
+        trackpadEnabled: trackpad,
+        blocked: () => divider.current,
+        watchResize: (node, entries) => {
+          if (divider.current || !isViewportResize(node, entries)) return
+          flushSync(() => setViewportWidth(node.clientWidth))
+        }
+      }),
+      [initialDirection, screen, first, labels.pages, labels.page, labels.overview, statusbar, pinned, trackpad]
+    )
+  )
   const ref = useCallback(
     (node: HTMLDivElement | null): void => {
       root.current = node
@@ -323,12 +336,15 @@ function useWorkspaceCanvas({
     const forget = panes.filter((pane) => pane.hidden || pane.maximized).map((pane) => pane.id)
     if (forget.some((id) => id in requested))
       setRequested((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !forget.includes(id))))
-    const changed = panes.find((pane) => !pane.hidden && before.has(pane.id) && !before.get(pane.id)!.maximized !== !pane.maximized)
+    const changed = panes.find(
+      (pane) => !pane.hidden && pane.maximized && before.has(pane.id) && !before.get(pane.id)!.maximized
+    )
     if (changed) pending.current = { region: changed.id, animate: true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutKey])
 
   const settle = useCallback((next: DesktopCanvasRegion) => {
+    callbacks.current.region = next
     setRegion(next)
     callbacks.current.onRegionChange?.(next)
     const nextScreen = next === "leading" ? "leading" : "main"
@@ -336,24 +352,33 @@ function useWorkspaceCanvas({
   }, [])
   const reduced = (): boolean => window.matchMedia("(prefers-reduced-motion: reduce)").matches
   const show = useCallback(
-    (target: DesktopCanvasRegion, animate: boolean): void => {
-      if (!api) return
+    (target: DesktopCanvasRegion, animate: boolean, allowReplacement = false): boolean => {
+      if (!api) return false
       const geometry = api.getGeometry()
-      const find = (name: DesktopCanvasRegion): number =>
+      const find = (name: DesktopCanvasRegion | undefined): number =>
         geometry.groups.findIndex((group) =>
           group.some(
             (item) => geometry.regions[item]?.dataset.atlasRegion === name && geometry.regions[item]!.offsetWidth > 0
           )
         )
-      // A hidden pane has no width, so a pane target falls back to the first pane on screen.
-      let index = find(target)
-      if (index === -1 && callbacks.current.paneIds.includes(target))
-        index = callbacks.current.paneIds.map(find).find((candidate) => candidate !== -1) ?? -1
-      if (index === -1) return
+      const candidate =
+        find(target) !== -1
+          ? target
+          : allowReplacement && callbacks.current.paneIds.includes(target)
+            ? callbacks.current.paneIds.find((id) => find(id) !== -1)
+            : undefined
+      const index = find(candidate)
+      const resolved =
+        candidate && callbacks.current.paneIds.includes(candidate)
+          ? callbacks.current.paneIds.find((id) => find(id) === index)
+          : candidate
+      if (!resolved) return false
       api.cancelInput()
-      api.goToSnap(index, { instant: !animate || reduced() })
+      api.goTo(resolved, { instant: !animate || reduced() })
+      settle(resolved)
+      return true
     },
-    [api]
+    [api, settle]
   )
 
   // Rebuild once per geometry change, then return to the region the host asked for or the one on screen.
@@ -361,23 +386,26 @@ function useWorkspaceCanvas({
   useLayoutEffect(() => {
     if (!api || viewportWidth === 0 || appliedKey.current === geometryKey || divider.current) return
     appliedKey.current = geometryKey
+    const target = pending.current ?? { region: callbacks.current.region, animate: false }
     api.refresh({ direction })
-    const target = pending.current ?? { region, animate: false }
     pending.current = null
-    show(target.region, target.animate)
-    // Collapsing or restoring a region can change the foreground without moving the canvas.
-    if (!target.animate) settle(groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds))
-  }, [api, viewportWidth, geometryKey, direction, region, show, settle])
+    show(target.region, target.animate, true)
+  }, [api, viewportWidth, geometryKey, direction, region, dragging, show, settle])
 
   useEffect(() => {
     if (!api) return
     const stop = api.subscribe((state: { moving: boolean }) => setMoving(state.moving))
     const settled = (): void => {
+      if (divider.current) return
       setMoving(false)
-      settle(groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds))
+      settle(groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds, api.getState().activeRegion))
     }
     api.on("settle", settled)
+    const stopOverview = api.overview.subscribe((state) => {
+      if (state === null) settled()
+    })
     return () => {
+      stopOverview()
       stop()
       api.off("settle", settled)
       api.cancelInput()
@@ -390,37 +418,51 @@ function useWorkspaceCanvas({
   useEffect(() => {
     if (!api || previousScreen.current === screen) return
     previousScreen.current = screen
-    if ((screen === "leading") === (groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds) === "leading")) return
-    show(screen === "leading" ? "leading" : callbacks.current.paneIds[0]!, true)
+    if (
+      (screen === "leading") ===
+      (groupRegion(api, api.getGeometry().selected, callbacks.current.paneIds) === "leading")
+    )
+      return
+    show(screen === "leading" ? "leading" : callbacks.current.paneIds[0]!, true, true)
   }, [api, screen, show])
 
   const navigate = useCallback(
     (target: Exclude<DesktopCanvasRegion, "leading">): void => {
-      pending.current = { region: target, animate: true }
-      show(target, true)
+      pending.current = show(target, true) ? null : { region: target, animate: true }
     },
     [show]
   )
   // A resizable pane's start edge carries the divider, as ALwith Desktop's preview does.
   const dragStart = useRef(0)
+  const dragBounds = useRef({ min: 0, max: 0 })
   const divide = {
     start: (id: string): void => {
       dragStart.current = sizes.panes[id] ?? 0
+      const geometry = api?.getGeometry()
+      const group = geometry?.groups.find((indices) =>
+        indices.some((index) => geometry.regions[index]?.dataset.atlasRegion === id)
+      )
+      const names = group?.map((index) => geometry!.regions[index]?.dataset.atlasRegion) ?? paneIds
+      const siblings = panes.filter((pane) => pane.id !== id && !pane.hidden && names.includes(pane.id))
+      const minimum = panes.find((pane) => pane.id === id)?.min ?? MIN_BLOCK_WIDTH
+      const sharedWidth = names.includes("navigation") ? screenWidth : viewportWidth
+      const reserved = siblings.reduce((sum, pane) => sum + (pane.min ?? MIN_BLOCK_WIDTH), 0)
+      // A positive undersized request moves this pane to the next screen; zero means automatic sizing.
+      // Expanding it must preserve the other panes' minimum widths.
+      dragBounds.current = { min: 1, max: Math.max(minimum, sharedWidth - reserved) }
       divider.current = true
       setDragging(id)
       api?.cancelInput()
     },
     drag: (id: string, dx: number): void => {
-      // Narrower than its minimum, or wide enough to squeeze its neighbour, the pane moves to the next screen.
-      setRequested((current) => ({ ...current, [id]: Math.max(0, Math.min(screenWidth, dragStart.current - dx)) }))
+      const next = Math.round(
+        Math.max(dragBounds.current.min, Math.min(dragBounds.current.max, dragStart.current - dx))
+      )
+      setRequested((current) => (current[id] === next ? current : { ...current, [id]: next }))
     },
     end: (): void => {
       divider.current = false
       setDragging(null)
-      // Widths followed the pointer without rebuilding; regroup once on release, as ALwith Desktop does.
-      appliedKey.current = geometryKey
-      api?.refresh({ direction })
-      show(region, false)
     }
   }
 
@@ -459,19 +501,48 @@ function PaneDivider({
   onEnd: () => void
 }): ReactElement {
   const startX = useRef<number | null>(null)
-  const finish = (): void => {
+  const previousUserSelect = useRef("")
+  const pending = useRef<number | null>(null)
+  const frame = useRef(0)
+  const drag = useRef(onDrag)
+  drag.current = onDrag
+  const flush = (): void => {
+    cancelAnimationFrame(frame.current)
+    frame.current = 0
+    if (pending.current !== null) {
+      const delta = pending.current
+      pending.current = null
+      drag.current(delta)
+    }
+  }
+  const finish = (applyPending = true): void => {
     if (startX.current === null) return
+    if (applyPending) flush()
+    else {
+      cancelAnimationFrame(frame.current)
+      frame.current = 0
+      pending.current = null
+    }
     startX.current = null
-    document.body.style.userSelect = ""
+    document.body.style.userSelect = previousUserSelect.current
     onEnd()
   }
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(frame.current)
+      if (startX.current !== null) document.body.style.userSelect = previousUserSelect.current
+    },
+    []
+  )
   return (
     <div
       data-no-drag
       className="desktop-shell-divider"
       onPointerDown={(event) => {
+        if (event.button !== 0 || startX.current !== null) return
         event.preventDefault()
         startX.current = event.clientX
+        previousUserSelect.current = document.body.style.userSelect
         document.body.style.userSelect = "none"
         onStart()
         event.currentTarget.setPointerCapture(event.pointerId)
@@ -479,11 +550,12 @@ function PaneDivider({
       onPointerMove={(event) => {
         if (startX.current === null) return
         event.preventDefault()
-        onDrag((event.clientX - startX.current) * (direction === "rtl" ? -1 : 1))
+        pending.current = (event.clientX - startX.current) * (direction === "rtl" ? -1 : 1)
+        if (!frame.current) frame.current = requestAnimationFrame(flush)
       }}
-      onPointerUp={finish}
-      onPointerCancel={finish}
-      onLostPointerCapture={finish}
+      onPointerUp={() => finish()}
+      onPointerCancel={() => finish(false)}
+      onLostPointerCapture={() => finish(false)}
     />
   )
 }
@@ -620,9 +692,7 @@ export function DesktopWorkspace({
     new Set(paneIds).size !== paneIds.length ||
     paneIds.some((id) => !/^[a-z][a-zA-Z0-9]*$/.test(id) || SHELL_REGIONS.includes(id))
   )
-    throw new Error(
-      "Panes need unique camelCase IDs other than leading, navigation and trailing"
-    )
+    throw new Error("Panes need unique camelCase IDs other than leading, navigation and trailing")
   // The navigation docks beside the first screen after it: the first pane that is not hidden.
   const first = panes.find((pane) => !pane.hidden)?.id ?? paneIds[0]!
   const labels = { ...defaultLabels(), ...labelOverrides }
