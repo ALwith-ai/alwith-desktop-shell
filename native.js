@@ -14,7 +14,7 @@ export async function onDesktopNewChat(handler) {
   return onDesktopMenu("new-chat", handler)
 }
 
-/** A native menu action (`new-chat`, `settings`, `find`), by click or its accelerator; the caller owns the cleanup. */
+/** A native menu action (`new-chat`, `settings`, `find`, `zoom-in`, `zoom-out`, `actual-size`), by click or its accelerator; the caller owns the cleanup. */
 export async function onDesktopMenu(action, handler) {
   if (!isTauri()) return () => {}
   return getCurrentWebviewWindow().listen(`alwith-shell:${action}`, handler)

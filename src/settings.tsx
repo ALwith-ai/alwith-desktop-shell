@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { onSettingsSectionChange, readBundledCliStatus } from "../native.js"
 import { desktopSettingsLabels } from "../status-labels.js"
 import { resolvedTheme, setThemePreference, subscribeTheme, themePreference } from "../theme.js"
+import { setZoomLevel, subscribeZoom, ZOOM_LEVELS, zoomLevel } from "../zoom.js"
 
 const IS_WINDOWS = typeof navigator !== "undefined" && navigator.platform.includes("Win")
 
@@ -339,10 +340,12 @@ export function ThemeModePicker({
   )
 }
 
-/** The shell's appearance mode row, on the shell's theme preference. */
+/** The shell's appearance rows: the theme preference and U's zoom level (View → Zoom In / Zoom Out / Actual Size). */
 export function AppearanceSection({ language }: { language: string }) {
   const labels = desktopSettingsLabels(language)
   const { preference, setPreference } = useDesktopTheme()
+  const zoom = useSyncExternalStore(subscribeZoom, zoomLevel, zoomLevel)
+  const percent = (level: number) => `${Math.round(level * 100)}%`
   return (
     <SettingGroup>
       <SettingRow title={labels.theme}>
@@ -352,6 +355,33 @@ export function AppearanceSection({ language }: { language: string }) {
           labels={{ light: labels.themeLight, system: labels.themeSystem, dark: labels.themeDark }}
           label={labels.theme}
         />
+      </SettingRow>
+      <SettingRow title={labels.zoom} aligned>
+        <Select
+          items={ZOOM_LEVELS.map((level) => ({ value: String(level), label: percent(level) }))}
+          value={String(zoom)}
+          onValueChange={(value) => {
+            if (typeof value === "string" && value) void setZoomLevel(Number(value)).catch(console.error)
+          }}
+        >
+          <SelectTrigger className="w-full" aria-label={labels.zoom}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent
+            align="start"
+            alignItemWithTrigger={false}
+            sideOffset={6}
+            className="max-w-(--available-width) min-w-0 p-1"
+          >
+            <SelectGroup>
+              {ZOOM_LEVELS.map((level) => (
+                <SelectItem key={level} value={String(level)}>
+                  {percent(level)}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
       </SettingRow>
     </SettingGroup>
   )

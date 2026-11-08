@@ -1,5 +1,7 @@
 //! Default native desktop shell. Product names come from the application's generated config.
 mod cli_status;
+#[cfg(target_os = "macos")]
+mod fullscreen_controls;
 pub mod updater;
 pub use cli_status::{bundled_cli_status, CliStatus};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
@@ -100,6 +102,24 @@ async fn has_trackpad() -> Result<bool, String> {
     atlas_tauri::availability::has_trackpad().await
 }
 
+/// Keeps the main window's native controls centered in the titlebar at the page's zoom level (macOS;
+/// the other platforms have nothing to move). U calls it from every zoom change.
+#[tauri::command]
+async fn set_traffic_light_zoom(window: tauri::WebviewWindow, zoom: f64) -> Result<(), String> {
+    if !zoom.is_finite() || zoom <= 0.0 {
+        return Err("Window zoom must be a positive finite number".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        fullscreen_controls::set_traffic_light_zoom(window, zoom).await
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        Ok(())
+    }
+}
+
 fn install_menu(app: &tauri::AppHandle, locale: &str) -> tauri::Result<()> {
     let zh = locale.starts_with("zh");
     let name = app.config().product_name.as_deref().unwrap_or(&app.package_info().name);
@@ -113,6 +133,16 @@ fn install_menu(app: &tauri::AppHandle, locale: &str) -> tauri::Result<()> {
         .build(app)?;
     let find = MenuItemBuilder::with_id("alwith-shell:find", if zh { "查找" } else { "Find" })
         .accelerator("CmdOrCtrl+F")
+        .build(app)?;
+    // U's View menu: the page zoom in Chrome's steps; the page answers through the shell's zoom module.
+    let zoom_in = MenuItemBuilder::with_id("alwith-shell:zoom-in", if zh { "放大" } else { "Zoom In" })
+        .accelerator("CmdOrCtrl+=")
+        .build(app)?;
+    let zoom_out = MenuItemBuilder::with_id("alwith-shell:zoom-out", if zh { "缩小" } else { "Zoom Out" })
+        .accelerator("CmdOrCtrl+-")
+        .build(app)?;
+    let actual_size = MenuItemBuilder::with_id("alwith-shell:actual-size", if zh { "实际大小" } else { "Actual Size" })
+        .accelerator("CmdOrCtrl+0")
         .build(app)?;
     let file = SubmenuBuilder::new(app, if zh { "文件" } else { "File" }).item(&new_chat);
     #[cfg(not(target_os = "macos"))]
@@ -128,6 +158,11 @@ fn install_menu(app: &tauri::AppHandle, locale: &str) -> tauri::Result<()> {
         .select_all()
         .separator()
         .item(&find)
+        .build()?;
+    let view = SubmenuBuilder::new(app, if zh { "视图" } else { "View" })
+        .item(&zoom_in)
+        .item(&zoom_out)
+        .item(&actual_size)
         .build()?;
     let window =
         SubmenuBuilder::new(app, if zh { "窗口" } else { "Window" }).minimize().maximize().fullscreen().build()?;
@@ -150,7 +185,7 @@ fn install_menu(app: &tauri::AppHandle, locale: &str) -> tauri::Result<()> {
     let menu = menu.item(&app_menu);
     #[cfg(not(target_os = "macos"))]
     let _ = name;
-    let menu = menu.item(&file).item(&edit).item(&window).build()?;
+    let menu = menu.item(&file).item(&edit).item(&view).item(&window).build()?;
     // Windows/Linux menus belong to the main window, never every auxiliary window.
     #[cfg(target_os = "macos")]
     app.set_menu(menu)?;
@@ -205,8 +240,17 @@ pub fn init_with_options(locale: Option<&str>, options: ShellOptions) -> tauri::
             confirm,
             updater::commands::updater_state,
             updater::commands::updater_check,
-            updater::commands::updater_install_and_relaunch
+            updater::commands::updater_install_and_relaunch,
+            set_traffic_light_zoom
         ])
+        // macOS: the main window's traffic lights sit at U's titlebar center and stay there through
+        // zoom, resizes and fullscreen transitions.
+        .on_window_ready(|window| {
+            #[cfg(target_os = "macos")]
+            fullscreen_controls::window_ready(&window);
+            #[cfg(not(target_os = "macos"))]
+            let _ = window;
+        })
         .setup(move |app, _| {
             app.manage(ShellStatus::new(Err("Desktop shell is not ready".into())));
             // Disabled without a configured updater; otherwise checks in the background and downloads hits.

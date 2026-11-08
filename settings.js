@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { onSettingsSectionChange, readBundledCliStatus } from "./native.js";
 import { desktopSettingsLabels } from "./status-labels.js";
 import { resolvedTheme, setThemePreference, subscribeTheme, themePreference } from "./theme.js";
+import { setZoomLevel, subscribeZoom, ZOOM_LEVELS, zoomLevel } from "./zoom.js";
 const IS_WINDOWS = typeof navigator !== "undefined" && navigator.platform.includes("Win");
 export function AuxWindowShell({
   title,
@@ -339,16 +340,51 @@ export function ThemeModePicker({
 export function AppearanceSection({ language }) {
   const labels = desktopSettingsLabels(language);
   const { preference, setPreference } = useDesktopTheme();
-  return jsx_w77yafs4(SettingGroup, {
-    children: jsx_w77yafs4(SettingRow, {
-      title: labels.theme,
-      children: jsx_w77yafs4(ThemeModePicker, {
-        value: preference,
-        onChange: (next) => void setPreference(next).catch(console.error),
-        labels: { light: labels.themeLight, system: labels.themeSystem, dark: labels.themeDark },
-        label: labels.theme
+  const zoom = useSyncExternalStore(subscribeZoom, zoomLevel, zoomLevel);
+  const percent = (level) => `${Math.round(level * 100)}%`;
+  return jsxs_eh6c78nj(SettingGroup, {
+    children: [
+      jsx_w77yafs4(SettingRow, {
+        title: labels.theme,
+        children: jsx_w77yafs4(ThemeModePicker, {
+          value: preference,
+          onChange: (next) => void setPreference(next).catch(console.error),
+          labels: { light: labels.themeLight, system: labels.themeSystem, dark: labels.themeDark },
+          label: labels.theme
+        })
+      }),
+      jsx_w77yafs4(SettingRow, {
+        title: labels.zoom,
+        aligned: true,
+        children: jsxs_eh6c78nj(Select, {
+          items: ZOOM_LEVELS.map((level) => ({ value: String(level), label: percent(level) })),
+          value: String(zoom),
+          onValueChange: (value) => {
+            if (typeof value === "string" && value)
+              setZoomLevel(Number(value)).catch(console.error);
+          },
+          children: [
+            jsx_w77yafs4(SelectTrigger, {
+              className: "w-full",
+              "aria-label": labels.zoom,
+              children: jsx_w77yafs4(SelectValue, {})
+            }),
+            jsx_w77yafs4(SelectContent, {
+              align: "start",
+              alignItemWithTrigger: false,
+              sideOffset: 6,
+              className: "max-w-(--available-width) min-w-0 p-1",
+              children: jsx_w77yafs4(SelectGroup, {
+                children: ZOOM_LEVELS.map((level) => jsx_w77yafs4(SelectItem, {
+                  value: String(level),
+                  children: percent(level)
+                }, level))
+              })
+            })
+          ]
+        })
       })
-    })
+    ]
   });
 }
 export function GeneralSection({

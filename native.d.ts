@@ -7,7 +7,7 @@ export type DesktopUpdaterState =
   | { type: "downloading"; update: DesktopUpdate; downloadedBytes: number | null; totalBytes: number | null }
 export declare function initializeDesktopShell(): Promise<DesktopShellState>;
 export declare function onDesktopNewChat(handler: () => void): Promise<() => void>;
-export type DesktopMenuAction = "new-chat" | "settings" | "find";
+export type DesktopMenuAction = "new-chat" | "settings" | "find" | "zoom-in" | "zoom-out" | "actual-size";
 export declare function onDesktopMenu(action: DesktopMenuAction, handler: () => void): Promise<() => void>;
 export declare function getUpdaterState(): Promise<DesktopUpdaterState>;
 export declare function onUpdaterState(handler: (state: DesktopUpdaterState) => void): Promise<() => void>;

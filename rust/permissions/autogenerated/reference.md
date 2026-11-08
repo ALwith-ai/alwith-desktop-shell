@@ -1,6 +1,6 @@
 ## Default Permission
 
-Read desktop shell state and trackpad availability, follow and install application updates, pick a folder.
+Read desktop shell state and trackpad availability, follow and install application updates, pick a folder, keep the native window controls aligned with the zoomed page.
 
 #### This default permission set includes the following:
 
@@ -12,6 +12,7 @@ Read desktop shell state and trackpad availability, follow and install applicati
 - `allow-updater-state`
 - `allow-updater-check`
 - `allow-updater-install-and-relaunch`
+- `allow-set-traffic-light-zoom`
 
 ## Permission Table
 
@@ -122,6 +123,32 @@ Enables the has_trackpad command without any pre-configured scope.
 <td>
 
 Denies the has_trackpad command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`alwith-desktop-shell:allow-set-traffic-light-zoom`
+
+</td>
+<td>
+
+Enables the set_traffic_light_zoom command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`alwith-desktop-shell:deny-set-traffic-light-zoom`
+
+</td>
+<td>
+
+Denies the set_traffic_light_zoom command without any pre-configured scope.
 
 </td>
 </tr>

@@ -10,8 +10,8 @@ export function desktopNavigationLabels(language) {
   return { ...labels, page: (number) => labels.page.replace("{{number}}", String(number)) }
 }
 const settingsLabels = {
-  "zh-CN": {"title": "设置", "general": "通用", "appearance": "外观", "about": "关于", "account": "账户", "theme": "主题", "themeLight": "浅色", "themeDark": "深色", "themeSystem": "系统", "language": "语言", "versionLabel": "版本", "engine": "引擎", "codexVersion": "Codex {{version}}", "updates": "更新"},
-  "en": {"title": "Settings", "general": "General", "appearance": "Appearance", "about": "About", "account": "Account", "theme": "Theme", "themeLight": "Light", "themeDark": "Dark", "themeSystem": "System", "language": "Language", "versionLabel": "Version", "engine": "Engine", "codexVersion": "Codex {{version}}", "updates": "Updates"}
+  "zh-CN": {"title": "设置", "general": "通用", "appearance": "外观", "about": "关于", "account": "账户", "theme": "主题", "themeLight": "浅色", "themeDark": "深色", "themeSystem": "系统", "language": "语言", "versionLabel": "版本", "engine": "引擎", "codexVersion": "Codex {{version}}", "updates": "更新", "zoom": "缩放", "zoomIn": "放大", "zoomOut": "缩小", "actualSize": "实际大小"},
+  "en": {"title": "Settings", "general": "General", "appearance": "Appearance", "about": "About", "account": "Account", "theme": "Theme", "themeLight": "Light", "themeDark": "Dark", "themeSystem": "System", "language": "Language", "versionLabel": "Version", "engine": "Engine", "codexVersion": "Codex {{version}}", "updates": "Updates", "zoom": "Zoom", "zoomIn": "Zoom in", "zoomOut": "Zoom out", "actualSize": "Actual size"}
 };
 /** U's settings window strings. */
 export function desktopSettingsLabels(language) { return settingsLabels[language] ?? settingsLabels[language.split("-")[0]] ?? settingsLabels.en }
