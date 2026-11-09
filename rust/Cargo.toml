@@ -1,6 +1,6 @@
 [package]
 name = "alwith-desktop-shell"
-version = "0.6.2"
+version = "0.6.3"
 edition = "2024"
 links = "alwith-desktop-shell"
 license = "AGPL-3.0-only"
@@ -17,7 +17,9 @@ serde = { version = "1", features = ["derive"] }
 log = "0.4"
 atlas-tauri = "0.1.10"
 tauri-plugin-updater = { version = "3.0.0-alpha.3", default-features = false, features = ["rustls-tls", "system-proxy"] }
-rfd = { version = "0.18", default-features = false, features = ["gtk3", "common-controls-v6"] }
+# rfd 0.18's gtk3 backend links gtk-sys 0.19 while tao and wry link 0.18, and `xdg-portal` answers
+# a message dialog through the zenity binary. Held at 0.17 until tao/wry move to gtk 0.19.
+rfd = { version = "0.17", default-features = false, features = ["gtk3", "common-controls-v6"] }
 
 tokio = { version = "1", features = ["process", "time", "sync", "macros", "rt-multi-thread"] }
 semver = "1"
