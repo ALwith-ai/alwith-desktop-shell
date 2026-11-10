@@ -145,7 +145,7 @@ export default ${JSON.stringify(`/${iconName}`)};
       externalBin: ["binaries/alwith-runtime", "binaries/bun", "binaries/codex", "binaries/codex-code-mode-host"],
       resources: { "resources/adapter": "adapter", "resources/native": "native", "resources/licenses": "licenses" },
       icon: ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
-      macOS: { minimumSystemVersion: "26.6", entitlements: "./Entitlements.plist" }
+      macOS: { minimumSystemVersion: "26.0", entitlements: "./Entitlements.plist" }
     },
     // Without `updates` no updater config exists and the generated app leaves tauri-plugin-updater unregistered.
     ...(c.updates
