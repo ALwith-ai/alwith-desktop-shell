@@ -99,6 +99,9 @@ window chrome.
   moves on to the following screen whole. `hidden` collapses a pane to no width and keeps its content mounted;
   a pane without it cannot be hidden. `maximized` gives a pane a whole screen, and `resizable` puts a divider
   on its start edge.
+- Every pane is drawn on the shell's plate: an Atlas surface (fill, clipping, the canvas's corner radius) painted
+  with the theme's border and background. A host draws no plate of its own; `--main-surface-background` overrides
+  the colour (a wallpaper, for example) and `bare: true` leaves a pane directly on the canvas.
 - `screen` (`"main" | "leading"`) and `onScreenChange` select the screen; `useDesktopCanvas()` gives content
   inside the workspace the canvas (`navigate(paneId | "trailing")`, `region`, `trailingActive`, `budget`).
 - `initialNavigationPinned` and `onNavigationPinnedChange` drive the pin toggle after the native window

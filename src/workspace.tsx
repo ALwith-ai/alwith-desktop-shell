@@ -53,6 +53,8 @@ export interface DesktopPane {
   maximized?: boolean
   /** Its start edge carries a divider; the dragged width is the pane's requested width until it is hidden or maximized. */
   resizable?: boolean
+  /** Sits directly on the canvas, without the plate every other pane is drawn on. */
+  bare?: boolean
 }
 const SHELL_REGIONS: readonly string[] = ["leading", "navigation", "trailing"]
 
@@ -872,7 +874,10 @@ export function DesktopWorkspace({
                   inert={!mainActive || pane.hidden}
                   aria-hidden={!mainActive || pane.hidden}
                 >
-                  <div className="main-screen-pane-body">{pane.children}</div>
+                  {/* Atlas owns the surface's geometry; the shell paints it, so a host never draws its own plate. */}
+                  <div className="main-screen-pane-body" data-atlas-surface={pane.bare ? undefined : ""}>
+                    {pane.children}
+                  </div>
                   {pane.resizable && (canvas.dragging === pane.id || (!pane.hidden && !pane.maximized)) && (
                     <PaneDivider
                       direction={direction}

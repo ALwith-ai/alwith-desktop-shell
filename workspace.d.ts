@@ -23,6 +23,8 @@ export interface DesktopPane {
   maximized?: boolean;
   /** Its start edge carries a divider; the dragged width is the pane's requested width until it is hidden or maximized. */
   resizable?: boolean;
+  /** Sits directly on the canvas, without the plate every other pane is drawn on. */
+  bare?: boolean;
 }
 export type DesktopWorkspaceLabels = DesktopNavigationLabels;
 export interface DesktopCanvas {

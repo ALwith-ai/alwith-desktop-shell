@@ -691,6 +691,7 @@ export function DesktopWorkspace({
                     children: [
                       jsx_w77yafs4("div", {
                         className: "main-screen-pane-body",
+                        "data-atlas-surface": pane.bare ? undefined : "",
                         children: pane.children
                       }),
                       pane.resizable && (canvas.dragging === pane.id || !pane.hidden && !pane.maximized) && jsx_w77yafs4(PaneDivider, {

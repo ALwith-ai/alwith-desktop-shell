@@ -301,6 +301,20 @@ html[data-window-backdrop="acrylic"]
 .main-screen-pane-body {
   flex: 1;
 }
+/*
+ * The plate a pane is drawn on. Atlas's surface gives it its geometry (fill, clipping and the canvas's corner
+ * radius); the shell gives it its paint, so every pane a host adds looks like its neighbours without drawing anything.
+ * A host with a wallpaper or its own surface colour sets --main-surface-background.
+ */
+.main-screen-pane-body[data-atlas-surface] {
+  box-sizing: border-box;
+  border: var(--main-surface-border-width) solid var(--border);
+  background: var(--main-surface-background, var(--background));
+}
+/* A collapsed pane has no width for a border to sit in. */
+[data-atlas-collapsed="true"] > .main-screen-pane-body[data-atlas-surface] {
+  border-width: 0;
+}
 .main-screen-pane-body > * {
   flex: 1;
 }
