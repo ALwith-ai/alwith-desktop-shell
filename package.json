@@ -1,6 +1,6 @@
 {
   "name": "@alwith/module-desktop-shell",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "type": "module",
   "license": "AGPL-3.0-only",
   "files": [
