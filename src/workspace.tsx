@@ -720,7 +720,7 @@ export function DesktopWorkspace({
   })
   const navigate = canvas.context.navigate
   const mainActive = screen === "main"
-  const showMainControls = mainActive && canvas.region !== "trailing"
+  const showMainControls = mainActive
   const docked = !mainActive || pinned
   const visible = docked || canvas.peeking
   const panelId = useId()
@@ -769,7 +769,8 @@ export function DesktopWorkspace({
     if (!visible && panel.current?.contains(document.activeElement)) toggle.current?.focus({ preventScroll: true })
   }, [visible, showMainControls])
 
-  const ToggleIcon = pinned ? PanelLeftIcon : PanelLeftDashedIcon
+  const navigationPinned = canvas.region === first && pinned
+  const ToggleIcon = navigationPinned ? PanelLeftIcon : PanelLeftDashedIcon
   const sidebarToggle = (
     <div
       className={titlebar ? "windows-sidebar-toggle" : "main-sidebar-toggle"}
@@ -780,16 +781,15 @@ export function DesktopWorkspace({
         variant="ghost"
         size="icon-xs"
         role="switch"
-        aria-label={labels.pin}
-        aria-checked={docked}
-        aria-expanded={visible}
+        aria-label={navigationPinned ? labels.unpin : labels.pin}
+        aria-checked={navigationPinned}
+        aria-expanded={canvas.region === first && visible}
         aria-controls={panelId}
         data-atlas-navigation-trigger
-        title={pinned ? labels.unpin : labels.pin}
+        title={navigationPinned ? labels.unpin : labels.pin}
         className="text-sidebar-foreground"
-        // The navigation closes only while it is on screen; docked on chat's screen while another is shown, the button
-        // returns to it instead.
-        onClick={() => (docked && canvas.region !== first ? navigate(first) : changePinned(!docked))}
+        // Away from the first pane the action returns there and opens navigation, regardless of its saved state.
+        onClick={() => changePinned(!navigationPinned)}
       >
         <ToggleIcon className="size-4 rtl:-scale-x-100" />
       </Button>
