@@ -138,7 +138,7 @@
   },
   "devDependencies": {
     "@nyssance/atlas": "^0.1.11",
-    "@nyssance/tsconfig": "^0.1.0",
+    "@nyssance/tsconfig": "^0.1.2",
     "@tauri-apps/api": "3.0.0-alpha.3",
     "@types/bun": "^1.4.4",
     "@types/react": "^19.3.0",
