@@ -10,9 +10,9 @@ include = ["/Cargo.toml", "/build.rs", "src/**/*.rs", "permissions/**/*"]
 readme = false
 [workspace]
 [build-dependencies]
-tauri-plugin = { version = "3.0.0-alpha.3", features = ["build"] }
+tauri-plugin = { version = "3.0.0-alpha.4", features = ["build"] }
 [dependencies]
-tauri = "3.0.0-alpha.5"
+tauri = "3.0.0-alpha.6"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
 atlas-tauri = "0.1.10"
