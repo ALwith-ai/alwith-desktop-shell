@@ -1,21 +1,11 @@
 {
+  "extends": "@nyssance/tsconfig",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "moduleDetection": "force",
-    "skipLibCheck": true,
-    "noEmit": true,
-    "types": [
-      "bun"
-    ],
+    "types": ["bun"],
     "paths": {
-      "@/*": [
-        "./node_modules/@nyssance/reui/dist/vega/*",
-        "./node_modules/@nyssance/shadcn/dist/vega/*"
-      ]
+      "@/*": ["./node_modules/@nyssance/reui/dist/vega/*", "./node_modules/@nyssance/shadcn/dist/vega/*"]
     }
   },
-  "include": [
-    "src",
-    "*.ts"
-  ]
+  "include": ["src", "*.ts"]
 }

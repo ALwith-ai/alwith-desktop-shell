@@ -125,7 +125,7 @@
   },
   "scripts": {
     "build": "bun build-ui.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun check --no-script",
     "test": "bun test",
     "prepack": "bun run build && bun test"
   },
@@ -138,13 +138,13 @@
   },
   "devDependencies": {
     "@nyssance/atlas": "^0.1.11",
+    "@nyssance/tsconfig": "^0.1.0",
     "@tauri-apps/api": "3.0.0-alpha.3",
     "@types/bun": "^1.4.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "typescript": "^7.0.2"
+    "react-dom": "^19.3.1"
   },
   "peerDependenciesMeta": {
     "@nyssance/atlas": {
@@ -153,10 +153,10 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
-    "@nyssance/reui": "^2.8.1",
+    "@nyssance/reui": "^2.8.3",
     "@nyssance/shadcn": "^4.23.4",
     "cn": "^0.5.2",
-    "lucide-react": "^1.70.0",
+    "lucide-react": "^1.73.0",
     "class-variance-authority": "^0.7.1"
   }
 }
