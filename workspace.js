@@ -163,6 +163,7 @@ function useWorkspaceCanvas({
   openLink,
   onError
 }) {
+  const insetTop = useContext(DesktopTitleBarContext) ? 0 : desktopDefaults.insetTop;
   const [initialDirection] = useState(direction);
   const root = useRef(null);
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -182,6 +183,7 @@ function useWorkspaceCanvas({
   const statusbar = useCallback(() => root.current?.closest("[data-main-screen]")?.querySelector(".main-window-statusbar") ?? null, []);
   const { ref: atlasRef, atlas: api } = useAtlas(useMemo(() => ({
     direction: initialDirection,
+    insetTop,
     initialRegion: screen === "leading" ? "leading" : first,
     pagination: { container: statusbar, label: labels.pages, pageLabel: (index) => labels.page(index + 1) },
     overview: { footer: statusbar, label: labels.overview },
@@ -198,7 +200,18 @@ function useWorkspaceCanvas({
         return;
       flushSync(() => setViewportWidth(node.clientWidth));
     }
-  }), [initialDirection, screen, first, labels.pages, labels.page, labels.overview, statusbar, pinned, trackpad]));
+  }), [
+    initialDirection,
+    insetTop,
+    screen,
+    first,
+    labels.pages,
+    labels.page,
+    labels.overview,
+    statusbar,
+    pinned,
+    trackpad
+  ]));
   const ref = useCallback((node) => {
     root.current = node;
     atlasRef(node);

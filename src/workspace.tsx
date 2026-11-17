@@ -245,6 +245,7 @@ function useWorkspaceCanvas({
   openLink?: (url: string) => void
   onError: (error: unknown) => void
 }) {
+  const insetTop = useContext(DesktopTitleBarContext) ? 0 : desktopDefaults.insetTop
   const [initialDirection] = useState(direction)
   const root = useRef<HTMLDivElement | null>(null)
   const [viewportWidth, setViewportWidth] = useState(0)
@@ -271,6 +272,7 @@ function useWorkspaceCanvas({
     useMemo(
       () => ({
         direction: initialDirection,
+        insetTop,
         initialRegion: screen === "leading" ? "leading" : first,
         pagination: { container: statusbar, label: labels.pages, pageLabel: (index: number) => labels.page(index + 1) },
         overview: { footer: statusbar, label: labels.overview },
@@ -287,7 +289,18 @@ function useWorkspaceCanvas({
           flushSync(() => setViewportWidth(node.clientWidth))
         }
       }),
-      [initialDirection, screen, first, labels.pages, labels.page, labels.overview, statusbar, pinned, trackpad]
+      [
+        initialDirection,
+        insetTop,
+        screen,
+        first,
+        labels.pages,
+        labels.page,
+        labels.overview,
+        statusbar,
+        pinned,
+        trackpad
+      ]
     )
   )
   const ref = useCallback(
