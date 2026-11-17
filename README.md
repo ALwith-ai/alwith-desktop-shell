@@ -98,12 +98,17 @@ window chrome.
   `preview`). Neighbours share a screen while both keep their `min` (320 by default), otherwise the next one
   moves on to the following screen whole. `hidden` collapses a pane to no width and keeps its content mounted;
   a pane without it cannot be hidden. `maximized` gives a pane a whole screen, and `resizable` puts a divider
-  on its start edge.
+  on the edge it shares with its neighbour: its start edge, or its end edge while it leads its screen.
+- `movable` panes can be rearranged by the user. Each visible movable pane gets a grip centred on its top edge:
+  dragging it onto another movable pane moves the pane there (Escape cancels), and the arrow keys move it past its neighbour.
+  Content stays mounted and an embedded browser surface keeps its page. Fixed panes keep the host's position.
+  Pass the saved order as `initialPaneOrder` and persist `onPaneOrderChange`; `movePane(id, -1 | 1)` on the
+  canvas lets a host offer the same move from its own menus.
 - Every pane is drawn on the shell's plate: an Atlas surface (fill, clipping, the canvas's corner radius) painted
   with the theme's border and background. A host draws no plate of its own; `--main-surface-background` overrides
   the colour (a wallpaper, for example) and `bare: true` leaves a pane directly on the canvas.
 - `screen` (`"main" | "leading"`) and `onScreenChange` select the screen; `useDesktopCanvas()` gives content
-  inside the workspace the canvas (`navigate(paneId | "trailing")`, `region`, `trailingActive`, `budget`).
+  inside the workspace the canvas (`navigate(paneId | "trailing")`, `movePane`, `region`, `trailingActive`, `budget`).
 - `initialNavigationPinned` and `onNavigationPinnedChange` drive the pin toggle after the native window
   controls (80px in on macOS outside fullscreen, 8px elsewhere). Unpinned, the navigation hides and floats
   back in from the start edge. The host persists the choice; calls are serialized. The root carries

@@ -8,6 +8,8 @@ import { PanelLeftDashedIcon, PanelLeftIcon } from "lucide-react"
 import {
   createContext,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactElement,
   type ReactNode,
   useCallback,
@@ -51,12 +53,52 @@ export interface DesktopPane {
   hidden?: boolean
   /** Takes a whole screen of its own. */
   maximized?: boolean
-  /** Its start edge carries a divider; the dragged width is the pane's requested width until it is hidden or maximized. */
+  /**
+   * Carries a divider on the edge it shares with its neighbour (its start edge, or its end edge while it leads); the
+   * dragged width is the pane's requested width until it is hidden or maximized.
+   */
   resizable?: boolean
+  /** The user can move it among the other movable panes; the shell draws its grip. */
+  movable?: boolean
   /** Sits directly on the canvas, without the plate every other pane is drawn on. */
   bare?: boolean
 }
 const SHELL_REGIONS: readonly string[] = ["leading", "navigation", "trailing"]
+
+/**
+ * The panes in canvas order: movable panes take the movable positions in the user's order (panes it does not name
+ * follow in the host's order); every other pane keeps the host's position.
+ */
+export function arrangePanes<Pane extends Pick<DesktopPane, "id" | "movable">>(
+  panes: readonly Pane[],
+  order: readonly string[]
+): Pane[] {
+  const rank = (pane: Pane): number => {
+    const index = order.indexOf(pane.id)
+    return index === -1 ? order.length : index
+  }
+  const movable = panes
+    .map((pane, index) => ({ pane, index }))
+    .filter(({ pane }) => pane.movable)
+    .sort((a, b) => rank(a.pane) - rank(b.pane) || a.index - b.index)
+  let next = 0
+  return panes.map((pane) => (pane.movable ? movable[next++]!.pane : pane))
+}
+
+/** The movable panes' order after moving `id` to `target`'s position; the panes between shift by one. */
+export function movePaneOrder(
+  panes: readonly Pick<DesktopPane, "id" | "movable">[],
+  id: string,
+  target: string
+): string[] {
+  const order = panes.filter((pane) => pane.movable).map((pane) => pane.id)
+  const from = order.indexOf(id)
+  const to = order.indexOf(target)
+  if (from === -1 || to === -1 || from === to) return order
+  order.splice(from, 1)
+  order.splice(to, 0, id)
+  return order
+}
 
 export interface DesktopWorkspaceLabels {
   pin: string
@@ -65,6 +107,8 @@ export interface DesktopWorkspaceLabels {
   page: (number: number) => string
   overview: string
   campaigns: string
+  /** The grip's accessible name for a pane, by title. */
+  movePane: (title: string) => string
 }
 
 const isMac = () => typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac")
@@ -190,6 +234,11 @@ export interface DesktopCanvas {
   trailingActive: boolean
   moving: boolean
   navigate: (region: Exclude<DesktopCanvasRegion, "leading">) => void
+  /**
+   * Moves a movable pane past its visible movable neighbour toward the start (-1) or the end (1) of the canvas;
+   * false when there is none.
+   */
+  movePane: (id: string, offset: -1 | 1) => boolean
 }
 export const DesktopCanvasContext = createContext<DesktopCanvas | null>(null)
 export function useDesktopCanvas(): DesktopCanvas | null {
@@ -449,10 +498,13 @@ function useWorkspaceCanvas({
   )
   // A resizable pane's start edge carries the divider, as ALwith Desktop's preview does.
   const dragStart = useRef(0)
+  const dragSign = useRef(-1)
   const dragBounds = useRef({ min: 0, max: 0 })
   const divide = {
-    start: (id: string): void => {
+    start: (id: string, edge: "start" | "end"): void => {
       dragStart.current = sizes.panes[id] ?? 0
+      // Dragging the start edge outward (toward the start) widens the pane; the end edge widens it toward the end.
+      dragSign.current = edge === "start" ? -1 : 1
       const geometry = api?.getGeometry()
       const group = geometry?.groups.find((indices) =>
         indices.some((index) => geometry.regions[index]?.dataset.atlasRegion === id)
@@ -471,7 +523,7 @@ function useWorkspaceCanvas({
     },
     drag: (id: string, dx: number): void => {
       const next = Math.round(
-        Math.max(dragBounds.current.min, Math.min(dragBounds.current.max, dragStart.current - dx))
+        Math.max(dragBounds.current.min, Math.min(dragBounds.current.max, dragStart.current + dragSign.current * dx))
       )
       setRequested((current) => (current[id] === next ? current : { ...current, [id]: next }))
     },
@@ -481,7 +533,7 @@ function useWorkspaceCanvas({
     }
   }
 
-  const context = useMemo<DesktopCanvas>(
+  const context = useMemo<Omit<DesktopCanvas, "movePane">>(
     () => ({
       viewportWidth,
       budget: screenWidth,
@@ -506,11 +558,13 @@ function useWorkspaceCanvas({
 
 function PaneDivider({
   direction,
+  edge,
   onStart,
   onDrag,
   onEnd
 }: {
   direction: "ltr" | "rtl"
+  edge: "start" | "end"
   onStart: () => void
   onDrag: (dx: number) => void
   onEnd: () => void
@@ -552,6 +606,7 @@ function PaneDivider({
   return (
     <div
       data-no-drag
+      data-edge={edge}
       className="desktop-shell-divider"
       onPointerDown={(event) => {
         if (event.button !== 0 || startX.current !== null) return
@@ -674,6 +729,8 @@ export function DesktopWorkspace({
   onRegionChange,
   initialNavigationPinned = true,
   onNavigationPinnedChange,
+  initialPaneOrder,
+  onPaneOrderChange,
   labels: labelOverrides,
   direction = "ltr",
   trackpad = true,
@@ -683,7 +740,7 @@ export function DesktopWorkspace({
 }: {
   navigation: ReactNode
   leading?: ReactNode
-  /** The main screen's panes in canvas order, between leading and trailing. */
+  /** The main screen's panes in the host's order, between leading and trailing; movable panes follow the user's order. */
   panes: DesktopPane[]
   trailing?: ReactNode
   toolbar?: ReactNode
@@ -694,6 +751,9 @@ export function DesktopWorkspace({
   onRegionChange?: (region: DesktopCanvasRegion) => void
   initialNavigationPinned?: boolean
   onNavigationPinnedChange?: (pinned: boolean) => void | Promise<void>
+  /** The user's order of movable panes, as last reported by `onPaneOrderChange`. */
+  initialPaneOrder?: readonly string[]
+  onPaneOrderChange?: (order: string[]) => void | Promise<void>
   labels?: Partial<DesktopWorkspaceLabels>
   direction?: "ltr" | "rtl"
   trackpad?: boolean
@@ -708,8 +768,10 @@ export function DesktopWorkspace({
     paneIds.some((id) => !/^[a-z][a-zA-Z0-9]*$/.test(id) || SHELL_REGIONS.includes(id))
   )
     throw new Error("Panes need unique camelCase IDs other than leading, navigation and trailing")
+  const [paneOrder, setPaneOrder] = useState<readonly string[]>(initialPaneOrder ?? [])
+  const arranged = arrangePanes(panes, paneOrder)
   // The navigation docks beside the first screen after it: the first pane that is not hidden.
-  const first = panes.find((pane) => !pane.hidden)?.id ?? paneIds[0]!
+  const first = arranged.find((pane) => !pane.hidden)?.id ?? arranged[0]!.id
   const labels = { ...defaultLabels(), ...labelOverrides }
   const titlebar = useContext(DesktopTitleBarContext)
   const workspaceControls = useContext(DesktopWorkspaceControlsContext)
@@ -723,7 +785,7 @@ export function DesktopWorkspace({
     pinned,
     onScreenChange,
     onRegionChange,
-    panes,
+    panes: arranged,
     trailing: trailing !== undefined && trailing !== null && trailing !== false,
     direction,
     labels,
@@ -741,6 +803,122 @@ export function DesktopWorkspace({
   const toggle = useRef<HTMLButtonElement>(null)
   const overlayCount = useRef(0)
   const saving = useRef(Promise.resolve())
+
+  // The user's pane order. A move slides each pane from where it was drawn; the canvas has re-measured by then.
+  const track = useRef<HTMLDivElement>(null)
+  const latest = useRef({ arranged, direction })
+  useLayoutEffect(() => {
+    latest.current = { arranged, direction }
+  })
+  const orderSaving = useRef(Promise.resolve())
+  const slide = useRef<{ from: Map<string, number>; focus: string | null } | null>(null)
+  const panesDrawn = (): HTMLElement[] => [
+    ...(track.current?.querySelectorAll<HTMLElement>(":scope > [data-screen-panel]") ?? [])
+  ]
+  const reorder = useCallback(
+    (order: string[], focus: string | null = null): void => {
+      const current = latest.current.arranged.filter((pane) => pane.movable).map((pane) => pane.id)
+      if (order.join("\0") === current.join("\0")) return
+      slide.current = {
+        from: new Map(panesDrawn().map((node) => [node.dataset.screenPanel!, node.getBoundingClientRect().left])),
+        focus
+      }
+      setPaneOrder(order)
+      orderSaving.current = orderSaving.current.then(() => onPaneOrderChange?.(order)).catch(onError)
+    },
+    [onPaneOrderChange, onError]
+  )
+  const movePane = useCallback(
+    (id: string, offset: -1 | 1, focus = false): boolean => {
+      const { arranged } = latest.current
+      const visible = arranged.filter((pane) => pane.movable && !pane.hidden)
+      const index = visible.findIndex((pane) => pane.id === id)
+      const neighbour = index === -1 ? undefined : visible[index + offset]
+      if (!neighbour) return false
+      reorder(movePaneOrder(arranged, id, neighbour.id), focus ? id : null)
+      return true
+    },
+    [reorder]
+  )
+  useLayoutEffect(() => {
+    const moved = slide.current
+    if (!moved) return
+    slide.current = null
+    if (moved.focus)
+      track.current
+        ?.querySelector<HTMLElement>(`[data-screen-panel="${moved.focus}"] > .desktop-shell-pane-grip`)
+        ?.focus({ preventScroll: true })
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    for (const node of panesDrawn()) {
+      const from = moved.from.get(node.dataset.screenPanel!)
+      if (from === undefined || node.offsetWidth === 0 || typeof node.animate !== "function") continue
+      const dx = from - node.getBoundingClientRect().left
+      if (Math.abs(dx) >= 1)
+        node.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], {
+          duration: 240,
+          easing: "cubic-bezier(0.2, 0, 0, 1)"
+        })
+    }
+  }, [paneOrder])
+
+  // Dragging a grip: past a small threshold the pane under the pointer is the drop target; release moves there.
+  const [paneDrag, setPaneDrag] = useState<{ id: string; target: string | null } | null>(null)
+  const gripOrigin = useRef<{ id: string; x: number; active: boolean; target: string | null } | null>(null)
+  const grip = {
+    down: (id: string, event: ReactPointerEvent<HTMLButtonElement>): void => {
+      if (event.button !== 0 || gripOrigin.current) return
+      gripOrigin.current = { id, x: event.clientX, active: false, target: null }
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+    },
+    move: (event: ReactPointerEvent<HTMLButtonElement>): void => {
+      const origin = gripOrigin.current
+      if (!origin || (!origin.active && Math.abs(event.clientX - origin.x) < 6)) return
+      origin.active = true
+      const movable = new Set(
+        latest.current.arranged.filter((pane) => pane.movable && !pane.hidden).map((pane) => pane.id)
+      )
+      const under = panesDrawn().find((node) => {
+        const bounds = node.getBoundingClientRect()
+        return (
+          node.dataset.screenPanel !== origin.id &&
+          movable.has(node.dataset.screenPanel!) &&
+          bounds.width > 0 &&
+          event.clientX >= bounds.left &&
+          event.clientX < bounds.right
+        )
+      })
+      const target = under?.dataset.screenPanel ?? null
+      origin.target = target
+      setPaneDrag((current) =>
+        current?.id === origin.id && current.target === target ? current : { id: origin.id, target }
+      )
+    },
+    end: (commit: boolean): void => {
+      const origin = gripOrigin.current
+      if (!origin) return
+      gripOrigin.current = null
+      setPaneDrag(null)
+      if (commit && origin.active && origin.target)
+        reorder(movePaneOrder(latest.current.arranged, origin.id, origin.target))
+    },
+    key: (id: string, event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+      // Escape drops a drag in progress where it started.
+      if (event.key === "Escape" && gripOrigin.current) {
+        event.preventDefault()
+        grip.end(false)
+        return
+      }
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+      event.preventDefault()
+      const toEnd = (event.key === "ArrowRight") === (latest.current.direction === "ltr")
+      movePane(id, toEnd ? 1 : -1, true)
+    }
+  }
+  const canvasContext = useMemo<DesktopCanvas>(
+    () => ({ ...canvas.context, movePane: (id: string, offset: -1 | 1) => movePane(id, offset) }),
+    [canvas.context, movePane]
+  )
+  const movableCount = arranged.filter((pane) => pane.movable && !pane.hidden).length
 
   const [footers, setFooters] = useState(0)
   const claimCampaigns = useCallback(() => {
@@ -831,7 +1009,7 @@ export function DesktopWorkspace({
     >
       {showMainControls && workspaceControls && toolbar && createPortal(toolbar, workspaceControls)}
       {showMainControls && titlebar && createPortal(sidebarToggle, titlebar)}
-      <DesktopCanvasContext.Provider value={canvas.context}>
+      <DesktopCanvasContext.Provider value={canvasContext}>
         <div className="main-window-body" dir={direction}>
           <div ref={canvas.ref} className="main-canvas-viewport" data-atlas-layout="sized">
             <header className="main-window-titlebar" data-atlas-topbar>
@@ -841,7 +1019,7 @@ export function DesktopWorkspace({
             <footer className="main-window-statusbar" data-atlas-footer>
               {statusBar === undefined ? <DesktopStatusBar openUrl={openLink} onError={onError} /> : statusBar}
             </footer>
-            <div className="main-screen-track" data-atlas-track>
+            <div ref={track} className="main-screen-track" data-atlas-track>
               <div
                 className="main-screen-leading"
                 data-screen-panel="leading"
@@ -875,32 +1053,55 @@ export function DesktopWorkspace({
                   </div>
                 </div>
               </DesktopNavigationOverlayContext.Provider>
-              {panes.map((pane) => (
-                <div
-                  key={pane.id}
-                  className="main-screen-pane"
-                  data-screen-panel={pane.id}
-                  data-atlas-region={pane.id}
-                  data-atlas-collapsed={canvas.sizes.panes[pane.id] === 0}
-                  aria-label={pane.title}
-                  style={{ width: canvas.sizes.panes[pane.id] }}
-                  inert={!mainActive || pane.hidden}
-                  aria-hidden={!mainActive || pane.hidden}
-                >
-                  {/* Atlas owns the surface's geometry; the shell paints it, so a host never draws its own plate. */}
-                  <div className="main-screen-pane-body" data-atlas-surface={pane.bare ? undefined : ""}>
-                    {pane.children}
+              {arranged.map((pane, index) => {
+                // The divider rides the edge the pane shares with its neighbour.
+                const edge = arranged.slice(0, index).some((other) => !other.hidden) ? "start" : "end"
+                return (
+                  <div
+                    key={pane.id}
+                    className="main-screen-pane"
+                    data-screen-panel={pane.id}
+                    data-pane-dragging={paneDrag?.id === pane.id || undefined}
+                    data-pane-drop-target={paneDrag?.target === pane.id || undefined}
+                    data-atlas-region={pane.id}
+                    data-atlas-collapsed={canvas.sizes.panes[pane.id] === 0}
+                    aria-label={pane.title}
+                    style={{ width: canvas.sizes.panes[pane.id] }}
+                    inert={!mainActive || pane.hidden}
+                    aria-hidden={!mainActive || pane.hidden}
+                  >
+                    {/* Atlas owns the surface's geometry; the shell paints it, so a host never draws its own plate. */}
+                    <div className="main-screen-pane-body" data-atlas-surface={pane.bare ? undefined : ""}>
+                      {pane.children}
+                    </div>
+                    {pane.resizable && (canvas.dragging === pane.id || (!pane.hidden && !pane.maximized)) && (
+                      <PaneDivider
+                        direction={direction}
+                        edge={edge}
+                        onStart={() => canvas.divide.start(pane.id, edge)}
+                        onDrag={(dx) => canvas.divide.drag(pane.id, dx)}
+                        onEnd={canvas.divide.end}
+                      />
+                    )}
+                    {pane.movable && mainActive && movableCount > 1 && !pane.hidden && !pane.maximized && (
+                      <button
+                        type="button"
+                        data-no-drag
+                        className="desktop-shell-pane-grip"
+                        aria-label={labels.movePane(pane.title)}
+                        title={labels.movePane(pane.title)}
+                        aria-keyshortcuts="ArrowLeft ArrowRight"
+                        onPointerDown={(event) => grip.down(pane.id, event)}
+                        onPointerMove={grip.move}
+                        onPointerUp={() => grip.end(true)}
+                        onPointerCancel={() => grip.end(false)}
+                        onLostPointerCapture={() => grip.end(true)}
+                        onKeyDown={(event) => grip.key(pane.id, event)}
+                      />
+                    )}
                   </div>
-                  {pane.resizable && (canvas.dragging === pane.id || (!pane.hidden && !pane.maximized)) && (
-                    <PaneDivider
-                      direction={direction}
-                      onStart={() => canvas.divide.start(pane.id)}
-                      onDrag={(dx) => canvas.divide.drag(pane.id, dx)}
-                      onEnd={canvas.divide.end}
-                    />
-                  )}
-                </div>
-              ))}
+                )
+              })}
               <aside
                 className="main-screen-trailing"
                 data-screen-panel="trailing"
@@ -916,6 +1117,13 @@ export function DesktopWorkspace({
           </div>
         </div>
       </DesktopCanvasContext.Provider>
+      {/*
+       * While a grip or divider is dragged, nothing under the pointer but the shell takes it: an embedded page's
+       * surface would otherwise receive the moves it passes over.
+       */}
+      {(paneDrag !== null || canvas.dragging !== null) && (
+        <div className="desktop-shell-drag-shield" data-drag={paneDrag ? "pane" : "divider"} aria-hidden />
+      )}
       {overlays}
     </SidebarProvider>
   )

@@ -21,8 +21,13 @@ export interface DesktopPane {
   hidden?: boolean;
   /** Takes a whole screen of its own. */
   maximized?: boolean;
-  /** Its start edge carries a divider; the dragged width is the pane's requested width until it is hidden or maximized. */
+  /**
+   * Carries a divider on the edge it shares with its neighbour (its start edge, or its end edge while it leads); the
+   * dragged width is the pane's requested width until it is hidden or maximized.
+   */
   resizable?: boolean;
+  /** The user can move it among the other movable panes, by dragging its grip or with the arrow keys on it. */
+  movable?: boolean;
   /** Sits directly on the canvas, without the plate every other pane is drawn on. */
   bare?: boolean;
 }
@@ -36,7 +41,19 @@ export interface DesktopCanvas {
   trailingActive: boolean;
   moving: boolean;
   navigate: (region: Exclude<DesktopCanvasRegion, "leading">) => void;
+  /**
+   * Moves a movable pane past its visible movable neighbour toward the start (-1) or the end (1) of the canvas;
+   * false when there is none.
+   */
+  movePane: (id: string, offset: -1 | 1) => boolean;
 }
+/**
+ * The panes in canvas order: movable panes take the movable positions in the user's order (panes it does not name
+ * follow in the host's order); every other pane keeps the host's position.
+ */
+export declare function arrangePanes<Pane extends Pick<DesktopPane, "id" | "movable">>(panes: readonly Pane[], order: readonly string[]): Pane[];
+/** The movable panes' order after moving `id` to `target`'s position; the panes between shift by one. */
+export declare function movePaneOrder(panes: readonly Pick<DesktopPane, "id" | "movable">[], id: string, target: string): string[];
 export declare const DesktopCanvasContext: Context<DesktopCanvas | null>;
 export declare function useDesktopCanvas(): DesktopCanvas | null;
 /** Portaled menus opened from the navigation retain its floating surface until they close. */
@@ -61,7 +78,7 @@ export declare function DesktopWindowsShell(props: { icon: string; title: string
 export declare function DesktopWorkspace(props: {
   navigation: ReactNode;
   leading?: ReactNode;
-  /** The main screen's panes in canvas order, between leading and trailing. */
+  /** The main screen's panes in the host's order, between leading and trailing; movable panes follow the user's order. */
   panes: DesktopPane[];
   trailing?: ReactNode;
   /** Workspace controls at the end of the title bar (portaled into the Windows title bar there). */
@@ -76,6 +93,10 @@ export declare function DesktopWorkspace(props: {
   initialNavigationPinned?: boolean;
   /** Persists the pin choice; calls are serialized so a rapid toggle cannot restore an older value. */
   onNavigationPinnedChange?: (pinned: boolean) => void | Promise<void>;
+  /** The user's order of movable panes, as last reported by `onPaneOrderChange`; unknown IDs are ignored. */
+  initialPaneOrder?: readonly string[];
+  /** Persists the movable panes' order after the user moves one; calls are serialized. */
+  onPaneOrderChange?: (order: string[]) => void | Promise<void>;
   /** Overrides for `desktopNavigationLabels(navigator.language)`. */
   labels?: Partial<DesktopWorkspaceLabels>;
   direction?: "ltr" | "rtl";

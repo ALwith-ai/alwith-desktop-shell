@@ -1,5 +1,5 @@
 import type { ReactNode, ReactElement } from "react";
-export interface DesktopNavigationLabels { pin: string; unpin: string; pages: string; page: (number: number) => string; overview: string; campaigns: string }
+export interface DesktopNavigationLabels { pin: string; unpin: string; pages: string; page: (number: number) => string; overview: string; campaigns: string; movePane: (title: string) => string }
 export declare function desktopNavigationLabels(language: string): DesktopNavigationLabels;
 export declare function DesktopHeader(props: { title?: ReactNode; status?: ReactNode; error?: ReactNode; children?: ReactNode }): ReactElement;
 

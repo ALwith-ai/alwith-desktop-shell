@@ -26,6 +26,25 @@ import { desktopNavigationLabels } from "./status-labels.js";
 import { DesktopStatusBar } from "./status-item.js";
 import { DesktopUpdateStatus } from "./updates.js";
 const SHELL_REGIONS = ["leading", "navigation", "trailing"];
+export function arrangePanes(panes, order) {
+  const rank = (pane) => {
+    const index = order.indexOf(pane.id);
+    return index === -1 ? order.length : index;
+  };
+  const movable = panes.map((pane, index) => ({ pane, index })).filter(({ pane }) => pane.movable).sort((a, b) => rank(a.pane) - rank(b.pane) || a.index - b.index);
+  let next = 0;
+  return panes.map((pane) => pane.movable ? movable[next++].pane : pane);
+}
+export function movePaneOrder(panes, id, target) {
+  const order = panes.filter((pane) => pane.movable).map((pane) => pane.id);
+  const from = order.indexOf(id);
+  const to = order.indexOf(target);
+  if (from === -1 || to === -1 || from === to)
+    return order;
+  order.splice(from, 1);
+  order.splice(to, 0, id);
+  return order;
+}
 const isMac = () => typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 const IS_WINDOWS = typeof navigator !== "undefined" && navigator.platform.includes("Win");
 export function useWindowFullscreen() {
@@ -324,10 +343,12 @@ function useWorkspaceCanvas({
     pending.current = show(target, true) ? null : { region: target, animate: true };
   }, [show]);
   const dragStart = useRef(0);
+  const dragSign = useRef(-1);
   const dragBounds = useRef({ min: 0, max: 0 });
   const divide = {
-    start: (id) => {
+    start: (id, edge) => {
       dragStart.current = sizes.panes[id] ?? 0;
+      dragSign.current = edge === "start" ? -1 : 1;
       const geometry = api?.getGeometry();
       const group = geometry?.groups.find((indices) => indices.some((index) => geometry.regions[index]?.dataset.atlasRegion === id));
       const names = group?.map((index) => geometry.regions[index]?.dataset.atlasRegion) ?? paneIds;
@@ -341,7 +362,7 @@ function useWorkspaceCanvas({
       api?.cancelInput();
     },
     drag: (id, dx) => {
-      const next = Math.round(Math.max(dragBounds.current.min, Math.min(dragBounds.current.max, dragStart.current - dx)));
+      const next = Math.round(Math.max(dragBounds.current.min, Math.min(dragBounds.current.max, dragStart.current + dragSign.current * dx)));
       setRequested((current) => current[id] === next ? current : { ...current, [id]: next });
     },
     end: () => {
@@ -370,6 +391,7 @@ function useWorkspaceCanvas({
 }
 function PaneDivider({
   direction,
+  edge,
   onStart,
   onDrag,
   onEnd
@@ -410,6 +432,7 @@ function PaneDivider({
   }, []);
   return jsx_w77yafs4("div", {
     "data-no-drag": true,
+    "data-edge": edge,
     className: "desktop-shell-divider",
     onPointerDown: (event) => {
       if (event.button !== 0 || startX.current !== null)
@@ -507,6 +530,8 @@ export function DesktopWorkspace({
   onRegionChange,
   initialNavigationPinned = true,
   onNavigationPinnedChange,
+  initialPaneOrder,
+  onPaneOrderChange,
   labels: labelOverrides,
   direction = "ltr",
   trackpad = true,
@@ -517,7 +542,9 @@ export function DesktopWorkspace({
   const paneIds = panes.map((pane) => pane.id);
   if (paneIds.length === 0 || new Set(paneIds).size !== paneIds.length || paneIds.some((id) => !/^[a-z][a-zA-Z0-9]*$/.test(id) || SHELL_REGIONS.includes(id)))
     throw new Error("Panes need unique camelCase IDs other than leading, navigation and trailing");
-  const first = panes.find((pane) => !pane.hidden)?.id ?? paneIds[0];
+  const [paneOrder, setPaneOrder] = useState(initialPaneOrder ?? []);
+  const arranged = arrangePanes(panes, paneOrder);
+  const first = arranged.find((pane) => !pane.hidden)?.id ?? arranged[0].id;
   const labels = { ...defaultLabels(), ...labelOverrides };
   const titlebar = useContext(DesktopTitleBarContext);
   const workspaceControls = useContext(DesktopWorkspaceControlsContext);
@@ -529,7 +556,7 @@ export function DesktopWorkspace({
     pinned,
     onScreenChange,
     onRegionChange,
-    panes,
+    panes: arranged,
     trailing: trailing !== undefined && trailing !== null && trailing !== false,
     direction,
     labels,
@@ -547,6 +574,105 @@ export function DesktopWorkspace({
   const toggle = useRef(null);
   const overlayCount = useRef(0);
   const saving = useRef(Promise.resolve());
+  const track = useRef(null);
+  const latest = useRef({ arranged, direction });
+  useLayoutEffect(() => {
+    latest.current = { arranged, direction };
+  });
+  const orderSaving = useRef(Promise.resolve());
+  const slide = useRef(null);
+  const panesDrawn = () => [
+    ...track.current?.querySelectorAll(":scope > [data-screen-panel]") ?? []
+  ];
+  const reorder = useCallback((order, focus = null) => {
+    const current = latest.current.arranged.filter((pane) => pane.movable).map((pane) => pane.id);
+    if (order.join("\x00") === current.join("\x00"))
+      return;
+    slide.current = {
+      from: new Map(panesDrawn().map((node) => [node.dataset.screenPanel, node.getBoundingClientRect().left])),
+      focus
+    };
+    setPaneOrder(order);
+    orderSaving.current = orderSaving.current.then(() => onPaneOrderChange?.(order)).catch(onError);
+  }, [onPaneOrderChange, onError]);
+  const movePane = useCallback((id, offset, focus = false) => {
+    const { arranged } = latest.current;
+    const visible = arranged.filter((pane) => pane.movable && !pane.hidden);
+    const index = visible.findIndex((pane) => pane.id === id);
+    const neighbour = index === -1 ? undefined : visible[index + offset];
+    if (!neighbour)
+      return false;
+    reorder(movePaneOrder(arranged, id, neighbour.id), focus ? id : null);
+    return true;
+  }, [reorder]);
+  useLayoutEffect(() => {
+    const moved = slide.current;
+    if (!moved)
+      return;
+    slide.current = null;
+    if (moved.focus)
+      track.current?.querySelector(`[data-screen-panel="${moved.focus}"] > .desktop-shell-pane-grip`)?.focus({ preventScroll: true });
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+      return;
+    for (const node of panesDrawn()) {
+      const from = moved.from.get(node.dataset.screenPanel);
+      if (from === undefined || node.offsetWidth === 0 || typeof node.animate !== "function")
+        continue;
+      const dx = from - node.getBoundingClientRect().left;
+      if (Math.abs(dx) >= 1)
+        node.animate([{ transform: `translateX(${dx}px)` }, { transform: "none" }], {
+          duration: 240,
+          easing: "cubic-bezier(0.2, 0, 0, 1)"
+        });
+    }
+  }, [paneOrder]);
+  const [paneDrag, setPaneDrag] = useState(null);
+  const gripOrigin = useRef(null);
+  const grip = {
+    down: (id, event) => {
+      if (event.button !== 0 || gripOrigin.current)
+        return;
+      gripOrigin.current = { id, x: event.clientX, active: false, target: null };
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    },
+    move: (event) => {
+      const origin = gripOrigin.current;
+      if (!origin || !origin.active && Math.abs(event.clientX - origin.x) < 6)
+        return;
+      origin.active = true;
+      const movable = new Set(latest.current.arranged.filter((pane) => pane.movable && !pane.hidden).map((pane) => pane.id));
+      const under = panesDrawn().find((node) => {
+        const bounds = node.getBoundingClientRect();
+        return node.dataset.screenPanel !== origin.id && movable.has(node.dataset.screenPanel) && bounds.width > 0 && event.clientX >= bounds.left && event.clientX < bounds.right;
+      });
+      const target = under?.dataset.screenPanel ?? null;
+      origin.target = target;
+      setPaneDrag((current) => current?.id === origin.id && current.target === target ? current : { id: origin.id, target });
+    },
+    end: (commit) => {
+      const origin = gripOrigin.current;
+      if (!origin)
+        return;
+      gripOrigin.current = null;
+      setPaneDrag(null);
+      if (commit && origin.active && origin.target)
+        reorder(movePaneOrder(latest.current.arranged, origin.id, origin.target));
+    },
+    key: (id, event) => {
+      if (event.key === "Escape" && gripOrigin.current) {
+        event.preventDefault();
+        grip.end(false);
+        return;
+      }
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+        return;
+      event.preventDefault();
+      const toEnd = event.key === "ArrowRight" === (latest.current.direction === "ltr");
+      movePane(id, toEnd ? 1 : -1, true);
+    }
+  };
+  const canvasContext = useMemo(() => ({ ...canvas.context, movePane: (id, offset) => movePane(id, offset) }), [canvas.context, movePane]);
+  const movableCount = arranged.filter((pane) => pane.movable && !pane.hidden).length;
   const [footers, setFooters] = useState(0);
   const claimCampaigns = useCallback(() => {
     setFooters((count) => count + 1);
@@ -621,7 +747,7 @@ export function DesktopWorkspace({
       showMainControls && workspaceControls && toolbar && createPortal(toolbar, workspaceControls),
       showMainControls && titlebar && createPortal(sidebarToggle, titlebar),
       jsx_w77yafs4(DesktopCanvasContext.Provider, {
-        value: canvas.context,
+        value: canvasContext,
         children: jsx_w77yafs4("div", {
           className: "main-window-body",
           dir: direction,
@@ -647,6 +773,7 @@ export function DesktopWorkspace({
                 }) : statusBar
               }),
               jsxs_eh6c78nj("div", {
+                ref: track,
                 className: "main-screen-track",
                 "data-atlas-track": true,
                 children: [
@@ -693,29 +820,49 @@ export function DesktopWorkspace({
                       })
                     })
                   }),
-                  panes.map((pane) => jsxs_eh6c78nj("div", {
-                    className: "main-screen-pane",
-                    "data-screen-panel": pane.id,
-                    "data-atlas-region": pane.id,
-                    "data-atlas-collapsed": canvas.sizes.panes[pane.id] === 0,
-                    "aria-label": pane.title,
-                    style: { width: canvas.sizes.panes[pane.id] },
-                    inert: !mainActive || pane.hidden,
-                    "aria-hidden": !mainActive || pane.hidden,
-                    children: [
-                      jsx_w77yafs4("div", {
-                        className: "main-screen-pane-body",
-                        "data-atlas-surface": pane.bare ? undefined : "",
-                        children: pane.children
-                      }),
-                      pane.resizable && (canvas.dragging === pane.id || !pane.hidden && !pane.maximized) && jsx_w77yafs4(PaneDivider, {
-                        direction,
-                        onStart: () => canvas.divide.start(pane.id),
-                        onDrag: (dx) => canvas.divide.drag(pane.id, dx),
-                        onEnd: canvas.divide.end
-                      })
-                    ]
-                  }, pane.id)),
+                  arranged.map((pane, index) => {
+                    const edge = arranged.slice(0, index).some((other) => !other.hidden) ? "start" : "end";
+                    return jsxs_eh6c78nj("div", {
+                      className: "main-screen-pane",
+                      "data-screen-panel": pane.id,
+                      "data-pane-dragging": paneDrag?.id === pane.id || undefined,
+                      "data-pane-drop-target": paneDrag?.target === pane.id || undefined,
+                      "data-atlas-region": pane.id,
+                      "data-atlas-collapsed": canvas.sizes.panes[pane.id] === 0,
+                      "aria-label": pane.title,
+                      style: { width: canvas.sizes.panes[pane.id] },
+                      inert: !mainActive || pane.hidden,
+                      "aria-hidden": !mainActive || pane.hidden,
+                      children: [
+                        jsx_w77yafs4("div", {
+                          className: "main-screen-pane-body",
+                          "data-atlas-surface": pane.bare ? undefined : "",
+                          children: pane.children
+                        }),
+                        pane.resizable && (canvas.dragging === pane.id || !pane.hidden && !pane.maximized) && jsx_w77yafs4(PaneDivider, {
+                          direction,
+                          edge,
+                          onStart: () => canvas.divide.start(pane.id, edge),
+                          onDrag: (dx) => canvas.divide.drag(pane.id, dx),
+                          onEnd: canvas.divide.end
+                        }),
+                        pane.movable && mainActive && movableCount > 1 && !pane.hidden && !pane.maximized && jsx_w77yafs4("button", {
+                          type: "button",
+                          "data-no-drag": true,
+                          className: "desktop-shell-pane-grip",
+                          "aria-label": labels.movePane(pane.title),
+                          title: labels.movePane(pane.title),
+                          "aria-keyshortcuts": "ArrowLeft ArrowRight",
+                          onPointerDown: (event) => grip.down(pane.id, event),
+                          onPointerMove: grip.move,
+                          onPointerUp: () => grip.end(true),
+                          onPointerCancel: () => grip.end(false),
+                          onLostPointerCapture: () => grip.end(true),
+                          onKeyDown: (event) => grip.key(pane.id, event)
+                        })
+                      ]
+                    }, pane.id);
+                  }),
                   jsx_w77yafs4("aside", {
                     className: "main-screen-trailing",
                     "data-screen-panel": "trailing",
@@ -731,6 +878,11 @@ export function DesktopWorkspace({
             ]
           })
         })
+      }),
+      (paneDrag !== null || canvas.dragging !== null) && jsx_w77yafs4("div", {
+        className: "desktop-shell-drag-shield",
+        "data-drag": paneDrag ? "pane" : "divider",
+        "aria-hidden": true
       }),
       overlays
     ]

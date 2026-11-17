@@ -318,7 +318,7 @@ html[data-window-backdrop="acrylic"]
 .main-screen-pane-body > * {
   flex: 1;
 }
-/* A resizable pane's divider rides its start edge. */
+/* A resizable pane's divider rides the edge it shares with its neighbour: its start edge unless it leads. */
 .desktop-shell-divider {
   position: absolute;
   inset-block: 0;
@@ -335,6 +335,79 @@ html[data-window-backdrop="acrylic"]
 }
 .desktop-shell-divider:hover {
   background-color: var(--ring);
+}
+/* The divider of a pane that leads its screen rides its end edge, beside the neighbour that follows. */
+.desktop-shell-divider[data-edge="end"] {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+  translate: 50% 0;
+}
+.desktop-shell-divider[data-edge="end"]:dir(rtl) {
+  translate: -50% 0;
+}
+/*
+ * A movable pane's grip, centred on its top edge as iPadOS draws a split view's handle. It shows while the pane is
+ * hovered, while it has focus and while it is dragged; dragging it onto another pane moves the pane there.
+ */
+.desktop-shell-pane-grip {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 50%;
+  z-index: 10;
+  width: 44px;
+  height: 12px;
+  translate: -50% 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.desktop-shell-pane-grip:dir(rtl) {
+  translate: 50% 0;
+}
+.desktop-shell-pane-grip::before {
+  content: "";
+  position: absolute;
+  inset-inline: 10px;
+  inset-block-start: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background-color: var(--muted-foreground);
+  opacity: 0.6;
+}
+.main-screen-pane:hover > .desktop-shell-pane-grip,
+.desktop-shell-pane-grip:focus-visible,
+[data-pane-dragging] > .desktop-shell-pane-grip {
+  opacity: 1;
+}
+.desktop-shell-pane-grip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+  border-radius: 9999px;
+}
+[data-pane-dragging] > .desktop-shell-pane-grip {
+  cursor: grabbing;
+}
+.desktop-shell-drag-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  cursor: grabbing;
+  user-select: none;
+}
+.desktop-shell-drag-shield[data-drag="divider"] {
+  cursor: col-resize;
+}
+[data-pane-dragging] > .main-screen-pane-body {
+  opacity: 0.6;
+}
+[data-pane-drop-target] > .main-screen-pane-body {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .main-sidebar-shell {
   z-index: 30;
