@@ -43,6 +43,8 @@ export type DesktopCanvasRegion = "leading" | "trailing" | (string & {})
  * minimum, otherwise the next one moves on to the following screen whole.
  */
 export interface DesktopPane {
+  /** Move this pane to another native window after an outside drop. */
+  onDetach?: () => void
   /** A unique camelCase ID other than `leading`, `navigation` and `trailing`; it is also the pane's region name. */
   id: string
   title: string
@@ -863,17 +865,29 @@ export function DesktopWorkspace({
 
   // Dragging a grip: past a small threshold the pane under the pointer is the drop target; release moves there.
   const [paneDrag, setPaneDrag] = useState<{ id: string; target: string | null } | null>(null)
-  const gripOrigin = useRef<{ id: string; x: number; active: boolean; target: string | null } | null>(null)
+  const gripOrigin = useRef<{
+    id: string
+    x: number
+    y: number
+    outside: boolean
+    active: boolean
+    target: string | null
+  } | null>(null)
   const grip = {
     down: (id: string, event: ReactPointerEvent<HTMLButtonElement>): void => {
       if (event.button !== 0 || gripOrigin.current) return
-      gripOrigin.current = { id, x: event.clientX, active: false, target: null }
+      gripOrigin.current = { id, x: event.clientX, y: event.clientY, outside: false, active: false, target: null }
       event.currentTarget.setPointerCapture?.(event.pointerId)
     },
     move: (event: ReactPointerEvent<HTMLButtonElement>): void => {
       const origin = gripOrigin.current
-      if (!origin || (!origin.active && Math.abs(event.clientX - origin.x) < 6)) return
+      if (!origin || (!origin.active && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 6)) return
       origin.active = true
+      origin.outside =
+        event.clientX < 0 ||
+        event.clientY < 0 ||
+        event.clientX >= window.innerWidth ||
+        event.clientY >= window.innerHeight
       const movable = new Set(
         latest.current.arranged.filter((pane) => pane.movable && !pane.hidden).map((pane) => pane.id)
       )
@@ -898,6 +912,10 @@ export function DesktopWorkspace({
       if (!origin) return
       gripOrigin.current = null
       setPaneDrag(null)
+      if (commit && origin.active && origin.outside) {
+        latest.current.arranged.find((pane) => pane.id === origin.id)?.onDetach?.()
+        return
+      }
       if (commit && origin.active && origin.target)
         reorder(movePaneOrder(latest.current.arranged, origin.id, origin.target))
     },
@@ -1095,7 +1113,7 @@ export function DesktopWorkspace({
                         onPointerMove={grip.move}
                         onPointerUp={() => grip.end(true)}
                         onPointerCancel={() => grip.end(false)}
-                        onLostPointerCapture={() => grip.end(true)}
+                        onLostPointerCapture={() => grip.end(false)}
                         onKeyDown={(event) => grip.key(pane.id, event)}
                       />
                     )}
@@ -1126,5 +1144,49 @@ export function DesktopWorkspace({
       )}
       {overlays}
     </SidebarProvider>
+  )
+}
+
+/** A detached pane uses the same pointer gesture; the native host resolves the destination. */
+export function DetachedPaneGrip({ label, onDrop }: { label: string; onDrop: () => void }) {
+  const origin = useRef<{ x: number; y: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const cancel = () => {
+    origin.current = null
+    setDragging(false)
+  }
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label={label}
+        title={label}
+        className="shrink-0 cursor-grab touch-none"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return
+          origin.current = { x: event.clientX, y: event.clientY }
+          event.currentTarget.setPointerCapture(event.pointerId)
+        }}
+        onPointerMove={(event) => {
+          const start = origin.current
+          if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 6) setDragging(true)
+        }}
+        onPointerUp={() => {
+          const commit = dragging
+          cancel()
+          if (commit) onDrop()
+        }}
+        onPointerCancel={cancel}
+        onLostPointerCapture={cancel}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") cancel()
+        }}
+      >
+        ⋮⋮
+      </Button>
+      {dragging && <div data-device-overlay className="fixed inset-0 cursor-grabbing" />}
+    </>
   )
 }

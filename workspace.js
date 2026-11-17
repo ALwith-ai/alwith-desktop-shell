@@ -1,4 +1,4 @@
-import { jsx as jsx_w77yafs4, jsxs as jsxs_eh6c78nj } from "react/jsx-runtime";
+import { jsx as jsx_w77yafs4, jsxs as jsxs_eh6c78nj, Fragment as Fragment_8vg9x3sq } from "react/jsx-runtime";
 import { connectTrackpad, isViewportResize } from "@nyssance/atlas/dom";
 import { desktopDefaults, MIN_BLOCK_WIDTH, resolveAtlasBlocks } from "@nyssance/atlas/layout";
 import { useAtlas } from "@nyssance/atlas/react";
@@ -632,14 +632,15 @@ export function DesktopWorkspace({
     down: (id, event) => {
       if (event.button !== 0 || gripOrigin.current)
         return;
-      gripOrigin.current = { id, x: event.clientX, active: false, target: null };
+      gripOrigin.current = { id, x: event.clientX, y: event.clientY, outside: false, active: false, target: null };
       event.currentTarget.setPointerCapture?.(event.pointerId);
     },
     move: (event) => {
       const origin = gripOrigin.current;
-      if (!origin || !origin.active && Math.abs(event.clientX - origin.x) < 6)
+      if (!origin || !origin.active && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 6)
         return;
       origin.active = true;
+      origin.outside = event.clientX < 0 || event.clientY < 0 || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight;
       const movable = new Set(latest.current.arranged.filter((pane) => pane.movable && !pane.hidden).map((pane) => pane.id));
       const under = panesDrawn().find((node) => {
         const bounds = node.getBoundingClientRect();
@@ -655,6 +656,10 @@ export function DesktopWorkspace({
         return;
       gripOrigin.current = null;
       setPaneDrag(null);
+      if (commit && origin.active && origin.outside) {
+        latest.current.arranged.find((pane) => pane.id === origin.id)?.onDetach?.();
+        return;
+      }
       if (commit && origin.active && origin.target)
         reorder(movePaneOrder(latest.current.arranged, origin.id, origin.target));
     },
@@ -857,7 +862,7 @@ export function DesktopWorkspace({
                           onPointerMove: grip.move,
                           onPointerUp: () => grip.end(true),
                           onPointerCancel: () => grip.end(false),
-                          onLostPointerCapture: () => grip.end(true),
+                          onLostPointerCapture: () => grip.end(false),
                           onKeyDown: (event) => grip.key(pane.id, event)
                         })
                       ]
@@ -885,6 +890,54 @@ export function DesktopWorkspace({
         "aria-hidden": true
       }),
       overlays
+    ]
+  });
+}
+export function DetachedPaneGrip({ label, onDrop }) {
+  const origin = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const cancel = () => {
+    origin.current = null;
+    setDragging(false);
+  };
+  return jsxs_eh6c78nj(Fragment_8vg9x3sq, {
+    children: [
+      jsx_w77yafs4(Button, {
+        type: "button",
+        variant: "ghost",
+        size: "icon-xs",
+        "aria-label": label,
+        title: label,
+        className: "shrink-0 cursor-grab touch-none",
+        onPointerDown: (event) => {
+          if (event.button !== 0)
+            return;
+          origin.current = { x: event.clientX, y: event.clientY };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        },
+        onPointerMove: (event) => {
+          const start = origin.current;
+          if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 6)
+            setDragging(true);
+        },
+        onPointerUp: () => {
+          const commit = dragging;
+          cancel();
+          if (commit)
+            onDrop();
+        },
+        onPointerCancel: cancel,
+        onLostPointerCapture: cancel,
+        onKeyDown: (event) => {
+          if (event.key === "Escape")
+            cancel();
+        },
+        children: "⋮⋮"
+      }),
+      dragging && jsx_w77yafs4("div", {
+        "data-device-overlay": true,
+        className: "fixed inset-0 cursor-grabbing"
+      })
     ]
   });
 }
