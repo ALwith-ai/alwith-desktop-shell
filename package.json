@@ -126,7 +126,7 @@
   "scripts": {
     "build": "bun build-ui.ts",
     "typecheck": "bun check --no-script",
-    "test": "bun test",
+    "test": "bun test --parallel",
     "prepack": "bun run build && bun test"
   },
   "publishConfig": {
