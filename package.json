@@ -156,7 +156,7 @@
     "@nyssance/reui": "^2.8.3",
     "@nyssance/shadcn": "^4.23.4",
     "cn": "^0.5.2",
-    "lucide-react": "^1.74.0",
+    "lucide-react": "^1.75.0",
     "class-variance-authority": "^0.7.1"
   }
 }
