@@ -9,5 +9,4 @@ pub const REVALIDATION_INTERVAL: Duration = Duration::from_secs(300);
 
 /// HTTP timeouts handed to `tauri-plugin-updater`; they bound the request itself.
 pub const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
-pub const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
 pub const REVALIDATION_TIMEOUT: Duration = Duration::from_secs(30);

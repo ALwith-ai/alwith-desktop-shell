@@ -3,7 +3,7 @@
 //! falls back to the plugin's own installer where the swap cannot run.
 
 use crate::updater::state::UpdateInfo;
-use crate::updater::{BoxFuture, Platform, ProgressFn, Release, UpdaterOptions, persist, scheduler};
+use crate::updater::{BoxFuture, Platform, ProgressFn, Release, UpdaterOptions, persist};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -112,7 +112,8 @@ impl Platform for PluginPlatform {
                 Some(update) => update.clone(),
                 None => Self::restored(&release.info, &release.manifest, self.app.updater_builder())?,
             };
-            update.timeout = Some(scheduler::DOWNLOAD_TIMEOUT);
+            // Do not carry the manifest check deadline into the archive download.
+            update.timeout = None;
             // `download` verifies the signature before it returns the bytes.
             update
                 .download(|chunk, total| on_progress(chunk as u64, total), || {})
