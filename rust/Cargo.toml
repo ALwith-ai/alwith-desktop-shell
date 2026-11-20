@@ -15,7 +15,7 @@ tauri-plugin = { version = "3.0.0-alpha.4", features = ["build"] }
 tauri = "3.0.0-alpha.6"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
-atlas-tauri = "0.1.10"
+atlas-tauri = "0.1"
 tauri-plugin-updater = { version = "3.0.0-alpha.3", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # Linux is not shipped. rfd's default xdg-portal backend keeps gtk-sys out of the dependency graph,
 # where rfd 0.18's gtk3 backend (gtk-sys 0.19) would conflict with tao and wry (gtk-sys 0.18).
