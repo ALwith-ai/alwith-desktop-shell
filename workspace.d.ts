@@ -120,6 +120,8 @@ export declare function DesktopWorkspace(props: {
   labels?: Partial<DesktopWorkspaceLabels>
   direction?: "ltr" | "rtl"
   trackpad?: boolean
+  /** The host uses its system title bar to drag over the top inset. */
+  nativeTitleBarDrag?: boolean
   /** Page zoom; keeps the Windows sidebar toggle at native size. */
   zoom?: number
   openLink?: (url: string) => void

@@ -179,6 +179,7 @@ function useWorkspaceCanvas({
   direction,
   labels,
   trackpad,
+  nativeTitleBarDrag,
   openLink,
   onError
 }) {
@@ -235,7 +236,7 @@ function useWorkspaceCanvas({
     root.current = node;
     atlasRef(node);
   }, [atlasRef]);
-  useEffect(() => api && isTauri() ? attachWindowDrag(api.root, onError) : undefined, [api, onError]);
+  useEffect(() => api && isTauri() && !nativeTitleBarDrag ? attachWindowDrag(api.root, onError) : undefined, [api, nativeTitleBarDrag, onError]);
   useEffect(() => {
     if (!api || !trackpad || !isTauri())
       return;
@@ -535,6 +536,7 @@ export function DesktopWorkspace({
   labels: labelOverrides,
   direction = "ltr",
   trackpad = true,
+  nativeTitleBarDrag = false,
   zoom = 1,
   openLink,
   onError = console.error
@@ -561,6 +563,7 @@ export function DesktopWorkspace({
     direction,
     labels,
     trackpad,
+    nativeTitleBarDrag,
     openLink,
     onError
   });

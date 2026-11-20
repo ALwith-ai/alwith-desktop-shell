@@ -281,6 +281,7 @@ function useWorkspaceCanvas({
   direction,
   labels,
   trackpad,
+  nativeTitleBarDrag,
   openLink,
   onError
 }: {
@@ -293,6 +294,7 @@ function useWorkspaceCanvas({
   direction: "ltr" | "rtl"
   labels: DesktopWorkspaceLabels
   trackpad: boolean
+  nativeTitleBarDrag: boolean
   openLink?: (url: string) => void
   onError: (error: unknown) => void
 }) {
@@ -361,7 +363,10 @@ function useWorkspaceCanvas({
     },
     [atlasRef]
   )
-  useEffect(() => (api && isTauri() ? attachWindowDrag(api.root, onError) : undefined), [api, onError])
+  useEffect(
+    () => (api && isTauri() && !nativeTitleBarDrag ? attachWindowDrag(api.root, onError) : undefined),
+    [api, nativeTitleBarDrag, onError]
+  )
   useEffect(() => {
     if (!api || !trackpad || !isTauri()) return
     return connectTrackpad(api, tauriTrackpad({ command: "plugin:alwith-desktop-shell|has_trackpad" }), onError)
@@ -736,6 +741,7 @@ export function DesktopWorkspace({
   labels: labelOverrides,
   direction = "ltr",
   trackpad = true,
+  nativeTitleBarDrag = false,
   zoom = 1,
   openLink,
   onError = console.error
@@ -759,6 +765,8 @@ export function DesktopWorkspace({
   labels?: Partial<DesktopWorkspaceLabels>
   direction?: "ltr" | "rtl"
   trackpad?: boolean
+  /** The host uses its system title bar to drag over the top inset. */
+  nativeTitleBarDrag?: boolean
   zoom?: number
   openLink?: (url: string) => void
   onError?: (error: unknown) => void
@@ -792,6 +800,7 @@ export function DesktopWorkspace({
     direction,
     labels,
     trackpad,
+    nativeTitleBarDrag,
     openLink,
     onError
   })
