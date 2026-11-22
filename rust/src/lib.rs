@@ -2,6 +2,7 @@
 mod cli_status;
 #[cfg(target_os = "macos")]
 mod fullscreen_controls;
+#[cfg(feature = "updates")]
 pub mod updater;
 pub use cli_status::{bundled_cli_status, CliStatus};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
@@ -15,6 +16,7 @@ pub struct ShellState {
     pub updates: bool,
 }
 
+#[cfg(feature = "updates")]
 pub use updater::UpdaterOptions;
 
 /// Who installs the main window's native material and Atlas.
@@ -31,13 +33,18 @@ pub enum NativeWindow {
 /// Application choices for the shell plugin.
 #[derive(Clone)]
 pub struct ShellOptions {
+    #[cfg(feature = "updates")]
     updater: UpdaterOptions,
     native_window: NativeWindow,
 }
 
 impl Default for ShellOptions {
     fn default() -> Self {
-        Self { updater: UpdaterOptions::default(), native_window: NativeWindow::Shell }
+        Self {
+            #[cfg(feature = "updates")]
+            updater: UpdaterOptions::default(),
+            native_window: NativeWindow::Shell,
+        }
     }
 }
 
@@ -47,6 +54,7 @@ impl ShellOptions {
     }
 
     /// The updater's choices; see [`UpdaterOptions`].
+    #[cfg(feature = "updates")]
     pub fn updater(mut self, updater: UpdaterOptions) -> Self {
         self.updater = updater;
         self
@@ -62,8 +70,18 @@ impl ShellOptions {
 /// Whether `plugins.updater` carries endpoints and a public key, exactly as the updater requires.
 /// Applications register `tauri_plugin_updater` only when this is true, because the plugin refuses
 /// a configuration without a public key.
+///
+/// Always false without the `updates` feature: such an application has no updater to configure.
 pub fn updates_configured(config: &tauri::Config) -> bool {
-    updater::valid_updater_config(config.plugins.0.get("updater"))
+    #[cfg(feature = "updates")]
+    {
+        updater::valid_updater_config(config.plugins.0.get("updater"))
+    }
+    #[cfg(not(feature = "updates"))]
+    {
+        let _ = config;
+        false
+    }
 }
 
 /// The platform's folder dialog, for a draft's new project; `None` when the user cancels.
@@ -211,6 +229,7 @@ pub fn init(locale: &str) -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
 }
 
 /// `init` with the application's updater choices (install window, Windows exit hooks, debug opt-in).
+#[cfg(feature = "updates")]
 pub fn init_with(locale: &str, updater: UpdaterOptions) -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
     init_with_options(Some(locale), ShellOptions::new().updater(updater))
 }
@@ -222,6 +241,7 @@ pub fn init_native() -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
 }
 
 /// `init_native` with the application's updater choices.
+#[cfg(feature = "updates")]
 pub fn init_native_with(updater: UpdaterOptions) -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
     init_with_options(None, ShellOptions::new().updater(updater))
 }
@@ -229,20 +249,33 @@ pub fn init_native_with(updater: UpdaterOptions) -> tauri::plugin::TauriPlugin<t
 /// The plugin with every application choice: the default menu in `locale` (`None` for an
 /// application that owns its complete menu), the updater, and who installs the native window.
 pub fn init_with_options(locale: Option<&str>, options: ShellOptions) -> tauri::plugin::TauriPlugin<tauri::DynRuntime> {
-    let ShellOptions { updater, native_window } = options;
+    #[cfg(feature = "updates")]
+    let updater = options.updater;
+    let native_window = options.native_window;
+    let builder = tauri::plugin::Builder::new("alwith-desktop-shell");
+    #[cfg(feature = "updates")]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        cli_status::cli_status,
+        status,
+        has_trackpad,
+        choose_folder,
+        confirm,
+        updater::commands::updater_state,
+        updater::commands::updater_check,
+        updater::commands::updater_install_and_relaunch,
+        set_traffic_light_zoom
+    ]);
+    #[cfg(not(feature = "updates"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        cli_status::cli_status,
+        status,
+        has_trackpad,
+        choose_folder,
+        confirm,
+        set_traffic_light_zoom
+    ]);
     let locale = locale.map(str::to_owned);
-    tauri::plugin::Builder::new("alwith-desktop-shell")
-        .invoke_handler(tauri::generate_handler![
-            cli_status::cli_status,
-            status,
-            has_trackpad,
-            choose_folder,
-            confirm,
-            updater::commands::updater_state,
-            updater::commands::updater_check,
-            updater::commands::updater_install_and_relaunch,
-            set_traffic_light_zoom
-        ])
+    builder
         // macOS: the main window's traffic lights sit at U's titlebar center and stay there through
         // zoom, resizes and fullscreen transitions.
         .on_window_ready(|window| {
@@ -254,6 +287,7 @@ pub fn init_with_options(locale: Option<&str>, options: ShellOptions) -> tauri::
         .setup(move |app, _| {
             app.manage(ShellStatus::new(Err("Desktop shell is not ready".into())));
             // Disabled without a configured updater; otherwise checks in the background and downloads hits.
+            #[cfg(feature = "updates")]
             updater::init(app, updater.clone());
             Ok(())
         })
@@ -263,11 +297,14 @@ pub fn init_with_options(locale: Option<&str>, options: ShellOptions) -> tauri::
                 // A programmatic exit or restart, or the event loop ending. A user's close request
                 // (`code: None`) may still be prevented by the application, so it does not stop updates.
                 tauri::RunEvent::ExitRequested { code: Some(_), .. } | tauri::RunEvent::Exit => {
-                    return updater::shutdown(app);
+                    #[cfg(feature = "updates")]
+                    updater::shutdown(app);
+                    return;
                 }
                 _ => return,
             }
             // Every plugin is set up by now, so recovery and the schedule can use tauri-plugin-updater.
+            #[cfg(feature = "updates")]
             updater::start(app);
             let result = install(app, locale.as_deref(), native_window).map_err(|error| error.to_string());
             if let Err(error) = &result {
