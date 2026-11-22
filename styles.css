@@ -185,26 +185,27 @@ html[data-window-backdrop="acrylic"] body {
   background-color: color-mix(in srgb, var(--sidebar) 60%, transparent);
 }
 html[data-window-backdrop="acrylic"] {
-  --tauri-plugin-decoration-z-index: 60;
+  --tauri-plugin-window-decorations-z-index: 60;
 }
 /* The native recovery frame already supplies its own title bar. */
-html[data-window-backdrop="acrylic"]:not(:has([data-tauri-plugin-decoration-active])) .windows-main-titlebar {
+html[data-window-backdrop="acrylic"]:not(:has([data-tauri-plugin-window-decorations-active])) .windows-main-titlebar {
   display: none;
 }
-html[data-window-backdrop="acrylic"] [data-tauri-plugin-decoration-root] [data-tauri-decoration-control] {
+html[data-window-backdrop="acrylic"] [data-tauri-plugin-window-decorations-root] [data-tauri-window-decorations-control] {
   width: calc(46px / var(--main-window-zoom, 1));
   min-width: 0;
-  height: var(--tauri-plugin-decoration-titlebar-height, 32px);
+  height: var(--tauri-plugin-window-decorations-titlebar-height, 32px);
   color: var(--foreground);
+  line-height: 1;
 }
-html[data-window-backdrop="acrylic"] [data-tauri-plugin-decoration-root] [data-tauri-decoration-control]:hover,
-html[data-window-backdrop="acrylic"] [data-tauri-plugin-decoration-root] [data-tauri-decoration-hover] {
+html[data-window-backdrop="acrylic"] [data-tauri-plugin-window-decorations-root] [data-tauri-window-decorations-control]:hover,
+html[data-window-backdrop="acrylic"] [data-tauri-plugin-window-decorations-root] [data-tauri-window-decorations-hover] {
   background: color-mix(in srgb, var(--foreground) 10%, transparent);
 }
-html[data-window-backdrop="acrylic"] [data-tauri-plugin-decoration-root] [data-tauri-decoration-control="close"]:hover,
+html[data-window-backdrop="acrylic"] [data-tauri-plugin-window-decorations-root] [data-tauri-window-decorations-control="close"]:hover,
 html[data-window-backdrop="acrylic"]
-  [data-tauri-plugin-decoration-root]
-  [data-tauri-decoration-control="close"][data-tauri-decoration-hover] {
+  [data-tauri-plugin-window-decorations-root]
+  [data-tauri-window-decorations-control="close"][data-tauri-window-decorations-hover] {
   color: var(--primary-foreground);
   background: var(--destructive);
 }

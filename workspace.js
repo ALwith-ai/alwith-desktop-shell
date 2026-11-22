@@ -94,10 +94,10 @@ export function DesktopWindowsShell({
       return;
     const style = document.documentElement.style;
     style.setProperty("--main-window-zoom", String(zoom));
-    style.setProperty("--tauri-plugin-decoration-titlebar-height", `${32 / zoom}px`);
+    style.setProperty("--tauri-plugin-window-decorations-titlebar-height", `${32 / zoom}px`);
     return () => {
       style.removeProperty("--main-window-zoom");
-      style.removeProperty("--tauri-plugin-decoration-titlebar-height");
+      style.removeProperty("--tauri-plugin-window-decorations-titlebar-height");
     };
   }, [enabled, zoom]);
   if (!enabled)
@@ -114,7 +114,7 @@ export function DesktopWindowsShell({
             jsxs_eh6c78nj("header", {
               className: "windows-main-titlebar flex shrink-0 items-center select-none",
               dir: "ltr",
-              style: { height: 32 / zoom, paddingRight: "var(--tauri-plugin-decoration-right-clearance, 0px)" },
+              style: { height: 32 / zoom, paddingRight: "var(--tauri-plugin-window-decorations-right-clearance, 0px)" },
               children: [
                 jsx_w77yafs4("div", {
                   className: "flex h-full shrink-0 items-center",
