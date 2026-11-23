@@ -201,7 +201,11 @@ function useWorkspaceCanvas({
     callbacks.current = { onScreenChange, onRegionChange, screen, paneIds, region };
   });
   const statusbar = useCallback(() => root.current?.closest("[data-main-screen]")?.querySelector(".main-window-statusbar") ?? null, []);
-  const { ref: atlasRef, atlas: api } = useAtlas(useMemo(() => ({
+  const {
+    ref: atlasRef,
+    atlas: api,
+    state: { visibleRegions }
+  } = useAtlas(useMemo(() => ({
     direction: initialDirection,
     insetTop,
     initialRegion: screen === "leading" ? "leading" : first,
@@ -374,11 +378,12 @@ function useWorkspaceCanvas({
   const context = useMemo(() => ({
     viewportWidth,
     budget: screenWidth,
+    visibleRegions,
     region,
     trailingActive: region === "trailing",
     moving,
     navigate
-  }), [viewportWidth, screenWidth, region, moving, navigate]);
+  }), [viewportWidth, screenWidth, visibleRegions, region, moving, navigate]);
   return {
     ref,
     sizes,

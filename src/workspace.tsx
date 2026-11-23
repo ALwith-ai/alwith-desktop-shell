@@ -228,6 +228,8 @@ const NAVIGATION_WIDTH = desktopDefaults.navigationWidth
 const NAVIGATION_PEEK = NAVIGATION_WIDTH - desktopDefaults.gutter
 
 export interface DesktopCanvas {
+  /** Regions on the current Atlas page, in canvas order. */
+  visibleRegions: readonly string[]
   viewportWidth: number
   /** The first screen's content width: the viewport less the docked navigation. */
   budget: number
@@ -321,7 +323,11 @@ function useWorkspaceCanvas({
     () => root.current?.closest("[data-main-screen]")?.querySelector<HTMLElement>(".main-window-statusbar") ?? null,
     []
   )
-  const { ref: atlasRef, atlas: api } = useAtlas(
+  const {
+    ref: atlasRef,
+    atlas: api,
+    state: { visibleRegions }
+  } = useAtlas(
     useMemo(
       () => ({
         direction: initialDirection,
@@ -544,12 +550,13 @@ function useWorkspaceCanvas({
     () => ({
       viewportWidth,
       budget: screenWidth,
+      visibleRegions,
       region,
       trailingActive: region === "trailing",
       moving,
       navigate
     }),
-    [viewportWidth, screenWidth, region, moving, navigate]
+    [viewportWidth, screenWidth, visibleRegions, region, moving, navigate]
   )
   return {
     ref,

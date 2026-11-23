@@ -35,6 +35,8 @@ export interface DesktopPane {
 }
 export type DesktopWorkspaceLabels = DesktopNavigationLabels
 export interface DesktopCanvas {
+  /** Regions on the current Atlas page, in canvas order. */
+  visibleRegions: readonly string[]
   viewportWidth: number
   /** The first screen's content width: the viewport less the docked navigation. */
   budget: number
