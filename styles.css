@@ -170,7 +170,7 @@ html[data-desktop-backdrop="native"] #root {
 /* ---- DesktopWorkspace: the main window canvas (moved from ALwith U) ---- */
 :root {
   --sidebar-floating-shadow: oklch(0 0 0 / 16%);
-  --main-surface-gutter: var(--atlas-gutter, 4px);
+  --main-surface-gutter: var(--atlas-gutter, 3px);
   --main-surface-border-width: 1px;
   --native-viewport-width: 100vw;
   /* The renderer updates 100vw with native page zoom; no React/IPC timing participates in compensation. */
@@ -244,8 +244,8 @@ html[data-window-backdrop="acrylic"]
   min-width: 0;
   overflow: clip;
 }
-/* Atlas owns the canvas: a 4px outer margin and 4px inside every region, so every surface, the
-   navigation and the window edge sit 8px apart. Nothing here adds horizontal spacing. */
+/* Atlas owns the canvas: a 3px outer margin and 3px inside every region, so every surface, the
+   navigation and the window edge sit 6px apart. Nothing here adds horizontal spacing. */
 .main-canvas-viewport {
   height: 100%;
 }
