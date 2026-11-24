@@ -4,9 +4,10 @@ use std::time::Duration;
 pub const FIRST_CHECK_DELAY: Duration = Duration::from_secs(30);
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(3600);
 /// While an update is ready, its release identity is revalidated this often, so the click
-/// that installs it needs no network.
+/// that installs it needs no network. An interrupted download continues on the same tick.
 pub const REVALIDATION_INTERVAL: Duration = Duration::from_secs(300);
 
-/// HTTP timeouts handed to `tauri-plugin-updater`; they bound the request itself.
+/// HTTP timeouts handed to `tauri-plugin-updater`; they bound the request itself. The archive
+/// download has no deadline: it is bounded by silence, see `reqwest-resumable`.
 pub const CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 pub const REVALIDATION_TIMEOUT: Duration = Duration::from_secs(30);

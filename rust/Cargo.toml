@@ -1,6 +1,6 @@
 [package]
 name = "alwith-desktop-shell"
-version = "0.6.6"
+version = "0.6.7"
 edition = "2024"
 links = "alwith-desktop-shell"
 license = "AGPL-3.0-only"
@@ -13,7 +13,7 @@ readme = false
 default = ["updates"]
 # Signed application updates. An application without auto update turns the default features off and
 # gets no updater code or `tauri-plugin-updater`.
-updates = ["dep:tauri-plugin-updater", "dep:semver", "dep:libc", "dep:flate2", "dep:tar"]
+updates = ["dep:tauri-plugin-updater", "dep:reqwest", "dep:reqwest-resumable", "dep:rustls", "dep:semver", "dep:libc", "dep:flate2", "dep:tar"]
 [build-dependencies]
 tauri-plugin = { version = "3.0.0-alpha.4", features = ["build"] }
 [dependencies]
@@ -22,6 +22,12 @@ serde = { version = "1", features = ["derive"] }
 log = "0.4"
 atlas-tauri = "0.1"
 tauri-plugin-updater = { version = "3.0.0-alpha.3", default-features = false, features = ["rustls-tls", "system-proxy"], optional = true }
+# The resumable archive download.
+reqwest-resumable = { version = "0.1", optional = true }
+# The plugin's own: its features choose the TLS backend and the proxy support of the `reqwest` the
+# archive download shares.
+reqwest = { version = "0.13", default-features = false, optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 # Linux is not shipped. rfd's default xdg-portal backend keeps gtk-sys out of the dependency graph,
 # where rfd 0.18's gtk3 backend (gtk-sys 0.19) would conflict with tao and wry (gtk-sys 0.18).
 rfd = { version = "0.18", features = ["common-controls-v6"] }

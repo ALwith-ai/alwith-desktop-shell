@@ -1,5 +1,6 @@
 //! The updater cache: `<app cache>/updater/` holds the downloaded archive, the state file that
-//! names it, and on macOS the staged application bundle extracted from it.
+//! names it, and on macOS the staged application bundle extracted from it. While an archive is
+//! still arriving it is `reqwest-resumable`'s unfinished download beside it.
 
 use crate::updater::state::UpdateInfo;
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,7 @@ pub fn valid_filename(name: &str) -> bool {
         && name != STATE_FILE
         && name != STAGED_DIR
         && name != PREVIOUS_DIR
+        && !reqwest_resumable::is_partial_file(Path::new(name))
         && !name.contains(['/', '\\', ':', '%', '\0'])
 }
 
@@ -69,20 +71,22 @@ pub fn save(state_json_path: &Path, state: &PersistedState) -> std::io::Result<(
     Ok(())
 }
 
-/// Writes `<filename>.part` and renames it, so an interrupted write never looks like an archive.
-pub fn write_archive(updater_dir: &Path, filename: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
-    if !valid_filename(filename) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("unsafe update filename {filename:?}"),
-        ));
+/// Drops the unfinished downloads of every archive but `filename`: releases that were superseded
+/// before they finished arriving.
+pub fn remove_other_parts(updater_dir: &Path, filename: &str) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(updater_dir) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        entries => entries?,
+    };
+    let keep = reqwest_resumable::partial_files(&updater_dir.join(filename));
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if reqwest_resumable::is_partial_file(&path) && !keep.contains(&path) && entry.file_type()?.is_file() {
+            remove_if_exists(&path)?;
+        }
     }
-    std::fs::create_dir_all(updater_dir)?;
-    let temporary = updater_dir.join(format!("{filename}.part"));
-    let archive = updater_dir.join(filename);
-    std::fs::write(&temporary, bytes)?;
-    std::fs::rename(&temporary, &archive)?;
-    Ok(archive)
+    Ok(())
 }
 
 /// Forgets the pending update: the state file, the archive and its partial download.
@@ -90,7 +94,7 @@ pub fn clear(updater_dir: &Path, archive_filename: Option<&str>) -> std::io::Res
     remove_if_exists(&updater_dir.join(STATE_FILE))?;
     if let Some(name) = archive_filename.filter(|name| valid_filename(name)) {
         remove_if_exists(&updater_dir.join(name))?;
-        remove_if_exists(&updater_dir.join(format!("{name}.part")))?;
+        reqwest_resumable::discard(&updater_dir.join(name))?;
     }
     Ok(())
 }
@@ -190,12 +194,33 @@ mod tests {
     }
 
     #[test]
-    fn archive_is_written_through_a_part_file_and_rejects_unsafe_names() {
+    fn an_archive_can_never_be_named_like_an_unfinished_download() {
+        // Each would be taken for the unfinished download of another archive.
+        for name in ["x.tar.gz.part", "x.tar.gz.part.json"] {
+            assert!(!valid_filename(name), "{name}");
+        }
+        assert!(valid_filename("x.partial.tar.gz"));
+    }
+
+    #[test]
+    fn superseded_unfinished_downloads_are_removed_and_the_current_one_kept() {
         let tmp = TempDir::new();
-        let archive = write_archive(tmp.path(), "x.tar.gz", b"data").unwrap();
-        assert_eq!(std::fs::read(&archive).unwrap(), b"data");
-        assert!(!tmp.path().join("x.tar.gz.part").exists());
-        assert!(write_archive(tmp.path(), "../x", b"data").is_err());
+        assert!(remove_other_parts(&tmp.path().join("absent"), "new.tar.gz").is_ok());
+        let kept = ["new.tar.gz.part", "new.tar.gz.part.json", "old.tar.gz", STATE_FILE];
+        let removed = ["old.tar.gz.part", "old.tar.gz.part.json", "older.tar.gz.part"];
+        for name in kept.iter().chain(&removed) {
+            std::fs::write(tmp.path().join(name), "data").unwrap();
+        }
+        std::fs::create_dir_all(tmp.path().join("staged-bundle.part")).unwrap();
+        remove_other_parts(tmp.path(), "new.tar.gz").unwrap();
+        for name in kept {
+            assert!(tmp.path().join(name).exists(), "{name}");
+        }
+        for name in removed {
+            assert!(!tmp.path().join(name).exists(), "{name}");
+        }
+        // The half-extracted bundle is a directory and not this function's to remove.
+        assert!(tmp.path().join("staged-bundle.part").exists());
     }
 
     #[test]
@@ -204,10 +229,11 @@ mod tests {
         std::fs::write(tmp.path().join(STATE_FILE), "{}").unwrap();
         std::fs::write(tmp.path().join("x.tar.gz"), "data").unwrap();
         std::fs::write(tmp.path().join("x.tar.gz.part"), "data").unwrap();
+        std::fs::write(tmp.path().join("x.tar.gz.part.json"), "{}").unwrap();
         std::fs::create_dir_all(staged_dir(tmp.path()).join("Contents")).unwrap();
         std::fs::create_dir_all(previous_dir(tmp.path())).unwrap();
         discard(tmp.path(), Some("x.tar.gz")).unwrap();
-        for name in [STATE_FILE, "x.tar.gz", "x.tar.gz.part", STAGED_DIR, PREVIOUS_DIR] {
+        for name in [STATE_FILE, "x.tar.gz", "x.tar.gz.part", "x.tar.gz.part.json", STAGED_DIR, PREVIOUS_DIR] {
             assert!(!tmp.path().join(name).exists(), "{name}");
         }
         discard(tmp.path(), Some("nonexistent.tar.gz")).unwrap();

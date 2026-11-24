@@ -1,10 +1,10 @@
-//! `tauri-plugin-updater` behind the updater's `Platform`: the plugin checks, downloads and
-//! verifies (minisign and the signed version); the shell stages and swaps the macOS bundle, and
-//! falls back to the plugin's own installer where the swap cannot run.
+//! `tauri-plugin-updater` behind the updater's `Platform`: the plugin checks and verifies
+//! (minisign and the signed version); the shell downloads resumably, stages and swaps the macOS
+//! bundle, and falls back to the plugin's own installer where the swap cannot run.
 
 use crate::updater::state::UpdateInfo;
-use crate::updater::{BoxFuture, Platform, ProgressFn, Release, UpdaterOptions, persist};
-use std::path::Path;
+use crate::updater::{BoxFuture, DownloadError, Platform, ProgressFn, Release, UpdaterOptions, persist};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -64,6 +64,44 @@ impl PluginPlatform {
         Ok(update)
     }
 
+    /// The client for the archive, configured as the plugin configures its own: the same proxy
+    /// choice and the same `plugins.updater` TLS switches. It carries no deadline for the whole
+    /// request; `reqwest-resumable` bounds silence instead.
+    fn client(&self, update: &Update) -> Result<reqwest::Client, String> {
+        // The plugin's TLS backend has no built-in provider; the plugin installs this one too.
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        }
+        let config = self.app.config().plugins.0.get("updater");
+        let enabled = |camel: &str, kebab: &str| {
+            config
+                .and_then(|config| config.get(camel).or_else(|| config.get(kebab)))
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+        // Not refused, as the plugin does not refuse it either: only the signature then protects
+        // the archive in transit.
+        if update.download_url.scheme() != "https"
+            && !enabled("dangerousInsecureTransportProtocol", "dangerous-insecure-transport-protocol")
+        {
+            log::warn!("the update download URL {} does not use the `https` protocol", update.download_url);
+        }
+        let mut builder = reqwest::Client::builder()
+            .user_agent(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .danger_accept_invalid_certs(enabled("dangerousAcceptInvalidCerts", "dangerous-accept-invalid-certs"))
+            .danger_accept_invalid_hostnames(enabled(
+                "dangerousAcceptInvalidHostnames",
+                "dangerous-accept-invalid-hostnames",
+            ));
+        if update.no_proxy {
+            builder = builder.no_proxy();
+        } else if let Some(proxy) = &update.proxy {
+            builder = builder.proxy(reqwest::Proxy::all(proxy.as_str()).map_err(|error| error.to_string())?);
+        }
+        builder.build().map_err(|error| error.to_string())
+    }
+
     /// The plugin's installer: verification, extraction and replacement (privileged when the
     /// install location needs it). On Windows it launches the installer and exits the process.
     fn plugin_install(&self, release: &Release, archive: &Path) -> Result<(), String> {
@@ -105,20 +143,44 @@ impl Platform for PluginPlatform {
         update.map(Self::release).transpose()
     }
 
-    fn download<'a>(&'a self, release: &'a Release, on_progress: ProgressFn) -> BoxFuture<'a, Result<Vec<u8>, String>> {
+    fn download<'a>(
+        &'a self, release: &'a Release, updater_dir: &'a Path, on_progress: ProgressFn,
+    ) -> BoxFuture<'a, Result<PathBuf, DownloadError>> {
         Box::pin(async move {
             // The update this session's check returned honours `requireSignedVersion` as configured.
-            let mut update = match release.native.as_ref().and_then(|native| native.downcast_ref::<Update>()) {
+            let update = match release.native.as_ref().and_then(|native| native.downcast_ref::<Update>()) {
                 Some(update) => update.clone(),
-                None => Self::restored(&release.info, &release.manifest, self.app.updater_builder())?,
+                None => Self::restored(&release.info, &release.manifest, self.app.updater_builder())
+                    .map_err(DownloadError::Failed)?,
             };
-            // Do not carry the manifest check deadline into the archive download.
-            update.timeout = None;
-            // `download` verifies the signature before it returns the bytes.
-            update
-                .download(|chunk, total| on_progress(chunk as u64, total), || {})
+            let filename = release.info.filename.clone();
+            let client = self.client(&update).map_err(DownloadError::Failed)?;
+            let mut headers = update.headers.clone();
+            if !headers.contains_key(reqwest::header::ACCEPT) {
+                headers.insert(
+                    reqwest::header::ACCEPT,
+                    reqwest::header::HeaderValue::from_static("application/octet-stream"),
+                );
+            }
+            let target = updater_dir.join(&filename);
+            // The signature covers the whole archive, so it is read once to be verified.
+            let verifier = update.clone();
+            reqwest_resumable::Download::new(update.download_url.clone())
+                .headers(headers)
+                .key(update.signature.clone())
+                .on_progress(move |progress| on_progress(progress.downloaded, progress.total))
+                .verify(move |archive| {
+                    let mut bytes = Vec::new();
+                    std::io::Read::read_to_end(archive, &mut bytes)?;
+                    Ok(verifier.verify(&bytes)?)
+                })
+                .to(&client, &target)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| match error {
+                    error if error.is_transient() => DownloadError::Interrupted(error.to_string()),
+                    error => DownloadError::Failed(error.to_string()),
+                })?;
+            Ok(target)
         })
     }
 
@@ -191,6 +253,9 @@ impl Platform for PluginPlatform {
         self.app.request_restart();
     }
 }
+
+/// The longest wait for a connection to the archive's server.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Windows: installation may fail after the `on_before_exit` hook stopped the application's work.
 #[derive(Default)]

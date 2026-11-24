@@ -1,12 +1,14 @@
 //! The standard auto-updater every ALwith desktop application shares through the shell plugin.
-//! The service owns the state machine; `tauri-plugin-updater` checks, downloads, verifies and,
-//! where the shell cannot, installs.
+//! The service owns the state machine; `tauri-plugin-updater` checks, verifies and, where the
+//! shell cannot, installs. The shell downloads the archive itself, resumably (`download`).
 //!
-//! A release found by the hourly check is downloaded straight away, verified, written to the
-//! updater cache and staged: on macOS the archive is extracted into a complete bundle, so the
-//! click that installs it only renames that bundle into place and restarts. While an update is
-//! ready its release identity is revalidated every five minutes; the click itself asks no network.
-//! The staged update survives restarts and is verified again (signature and identity) at launch.
+//! A release found by the hourly check is downloaded straight away into the updater cache,
+//! verified and staged: on macOS the archive is extracted into a complete bundle, so the click
+//! that installs it only renames that bundle into place and restarts. An interrupted download
+//! keeps what arrived and continues from there, within minutes or after a restart. While an
+//! update is ready its release identity is revalidated every five minutes; the click itself asks
+//! no network. The staged update survives restarts and is verified again (signature and identity)
+//! at launch.
 //!
 //! One `operation` lock serialises check and download, revalidation, recovery and installation.
 
@@ -33,6 +35,7 @@ use std::time::{Duration, Instant};
 pub const STATE_EVENT: &str = "alwith-desktop-shell:updater-state";
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+/// Receives the bytes of the archive on disk so far, and the total when it is known.
 pub type ProgressFn = Box<dyn Fn(u64, Option<u64>) + Send + Sync>;
 /// An application hook; it receives the application handle.
 pub type Hook = Arc<dyn Fn(&tauri::AppHandle) + Send + Sync>;
@@ -117,12 +120,33 @@ impl std::fmt::Debug for Release {
     }
 }
 
+/// Why an archive did not arrive.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DownloadError {
+    /// The transfer broke off; what arrived is kept and a later attempt continues from it.
+    Interrupted(String),
+    /// Trying again would not help: the server refused, the disk failed, or the archive does not
+    /// verify.
+    Failed(String),
+}
+
+impl std::fmt::Display for DownloadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interrupted(reason) | Self::Failed(reason) => f.write_str(reason),
+        }
+    }
+}
+
 /// The platform side of the updater. Blocking methods run on a blocking thread.
 pub trait Platform: Send + Sync + 'static {
     /// One bounded request to the endpoints (blocking).
     fn check(&self, timeout: Duration) -> Result<Option<Release>, String>;
-    /// Downloads the archive and verifies its signature.
-    fn download<'a>(&'a self, release: &'a Release, on_progress: ProgressFn) -> BoxFuture<'a, Result<Vec<u8>, String>>;
+    /// Brings the archive into `updater_dir`, continuing an unfinished download of the same
+    /// release, verifies its signature and returns its path.
+    fn download<'a>(
+        &'a self, release: &'a Release, updater_dir: &'a Path, on_progress: ProgressFn,
+    ) -> BoxFuture<'a, Result<PathBuf, DownloadError>>;
     /// Re-creates a cached release from its manifest and verifies the archive against it, without
     /// network (blocking).
     fn restore(&self, info: &UpdateInfo, manifest: &serde_json::Value, archive: &Path) -> Result<Release, String>;
@@ -183,6 +207,9 @@ pub struct UpdaterService {
     generation: AtomicU64,
     stopped: AtomicBool,
     started: AtomicBool,
+    /// A download broke off with part of the archive on disk; it continues at the next
+    /// revalidation tick instead of waiting for the hourly check.
+    interrupted: AtomicBool,
     stop: tokio::sync::Notify,
     release: Mutex<Option<Release>>,
     context: OnceLock<Arc<Context>>,
@@ -197,6 +224,7 @@ impl UpdaterService {
             generation: AtomicU64::new(0),
             stopped: AtomicBool::new(false),
             started: AtomicBool::new(false),
+            interrupted: AtomicBool::new(false),
             stop: tokio::sync::Notify::new(),
             release: Mutex::new(None),
             context: OnceLock::new(),
@@ -303,6 +331,13 @@ impl UpdaterService {
         }
     }
 
+    /// Continues an interrupted download; skipped while another operation runs.
+    pub async fn resume_interrupted(self: &Arc<Self>) {
+        if self.interrupted.load(Ordering::SeqCst) {
+            self.scheduled_check().await;
+        }
+    }
+
     /// Idle → check → download → stage → Ready. The caller holds the operation lock.
     async fn check_and_download(self: &Arc<Self>, context: &Context) {
         if !self.transition(|state| matches!(state, State::Idle), State::CheckingForUpdates) {
@@ -322,23 +357,32 @@ impl UpdaterService {
             Ok(Ok(Some(release))) => release,
         };
         self.set_state_silent(State::AvailableForDownload { update: release.info.clone() });
+        self.interrupted.store(false, Ordering::SeqCst);
+        let started = Instant::now();
         let filename = release.info.filename.clone();
-        if let Err(error) = self.download_and_stage(context, release).await {
-            log::warn!("update download failed: {error}");
+        let archive = match self.download(context, &release).await {
+            Ok(archive) => archive,
+            Err(error) => {
+                // Back to `Idle`, or the checks (which only run from `Idle`) are stuck for good.
+                // What arrived stays in the cache for the next attempt.
+                log::warn!("update download failed: {error}");
+                self.interrupted.store(matches!(error, DownloadError::Interrupted(_)), Ordering::SeqCst);
+                return self.back_to_idle();
+            }
+        };
+        if let Err(error) = self.stage(context, release, archive, started).await {
+            log::warn!("update staging failed: {error}");
             let dir = context.dir.clone();
             let _ = blocking(move || {
                 persist::discard_or_log(&dir, Some(&filename));
                 Ok(())
             })
             .await;
-            // A failed download must return to `Idle`, or the hourly check (which only runs from
-            // `Idle`) is stuck for good.
             self.back_to_idle();
         }
     }
 
-    async fn download_and_stage(self: &Arc<Self>, context: &Context, release: Release) -> Result<(), String> {
-        let started = Instant::now();
+    async fn download(self: &Arc<Self>, context: &Context, release: &Release) -> Result<PathBuf, DownloadError> {
         let update = release.info.clone();
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.set_state(State::Downloading {
@@ -346,20 +390,26 @@ impl UpdaterService {
             downloaded_bytes: Some(0),
             total_bytes: update.content_length,
         });
+        // An unfinished download of a release that was superseded will never be continued.
+        let (dir, filename) = (context.dir.clone(), update.filename.clone());
+        if let Err(error) =
+            blocking(move || persist::remove_other_parts(&dir, &filename).map_err(|e| e.to_string())).await
+        {
+            log::warn!("failed to clear superseded downloads: {error}");
+        }
 
         // Progress is throttled to about 1% (at least 64KB) so the IPC channel is not flooded;
-        // the total prefers the HTTP Content-Length the plugin reports.
+        // the total prefers the length the server announced. It can move backwards: a download
+        // that cannot be continued starts over.
         let svc = self.clone();
         let progress_update = update.clone();
-        let downloaded = Arc::new(AtomicU64::new(0));
         let last_emit = Arc::new(AtomicU64::new(0));
-        let on_progress: ProgressFn = Box::new(move |chunk, total| {
-            let now = downloaded.fetch_add(chunk, Ordering::Relaxed) + chunk;
+        let on_progress: ProgressFn = Box::new(move |now, total| {
             let total = total.or(progress_update.content_length);
             let threshold = total.map_or(262_144, |t| (t / 100).max(65_536));
             let prev = last_emit.load(Ordering::Relaxed);
             let done = total.is_some_and(|t| now >= t);
-            if now.saturating_sub(prev) >= threshold || done {
+            if now.abs_diff(prev) >= threshold || done {
                 last_emit.store(now, Ordering::Relaxed);
                 let mut state = svc.state.write().unwrap();
                 if svc.generation.load(Ordering::SeqCst) == generation
@@ -376,16 +426,17 @@ impl UpdaterService {
             }
         });
 
-        let bytes = context.platform.download(&release, on_progress).await?;
+        let archive = context.platform.download(release, &context.dir, on_progress).await?;
         if self.is_stopped() {
-            return Err("the application is closing".into());
+            return Err(DownloadError::Interrupted("the application is closing".into()));
         }
-        let dir = context.dir.clone();
-        let filename = update.filename.clone();
-        let archive =
-            blocking(move || persist::write_archive(&dir, &filename, &bytes).map_err(|error| error.to_string()))
-                .await?;
+        Ok(archive)
+    }
 
+    async fn stage(
+        self: &Arc<Self>, context: &Context, release: Release, archive: PathBuf, started: Instant,
+    ) -> Result<(), String> {
+        let update = release.info.clone();
         self.set_state(State::Staging { update: update.clone() });
         let platform = context.platform.clone();
         let staged = persist::staged_dir(&context.dir);
@@ -602,7 +653,8 @@ impl UpdaterService {
         Ok(())
     }
 
-    /// Recovery, then the hourly check and the five-minute revalidation, until `shutdown`.
+    /// Recovery, then the hourly check and the five-minute tick that revalidates a ready update or
+    /// continues an interrupted download, until `shutdown`.
     pub async fn run(
         self: Arc<Self>, first_check: Duration, check_interval: Duration, revalidation_interval: Duration,
     ) {
@@ -620,7 +672,10 @@ impl UpdaterService {
             loop {
                 tokio::select! {
                     _ = checks.tick() => svc.scheduled_check().await,
-                    _ = revalidations.tick() => svc.revalidate().await,
+                    _ = revalidations.tick() => {
+                        svc.revalidate().await;
+                        svc.resume_interrupted().await;
+                    }
                 }
             }
         };

@@ -19,7 +19,7 @@ struct MockPlatform {
     check_gate: Mutex<Option<mpsc::Receiver<()>>>,
     check_entered: tokio::sync::Notify,
     checks: AtomicUsize,
-    download: Mutex<Result<Vec<u8>, String>>,
+    download: Mutex<Result<Vec<u8>, DownloadError>>,
     download_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
     download_entered: tokio::sync::Notify,
     downloads: AtomicUsize,
@@ -99,7 +99,9 @@ impl Platform for MockPlatform {
         Ok(remote.map(|info| Release { manifest: serde_json::json!({ "version": info.version }), info, native: None }))
     }
 
-    fn download<'a>(&'a self, release: &'a Release, on_progress: ProgressFn) -> BoxFuture<'a, Result<Vec<u8>, String>> {
+    fn download<'a>(
+        &'a self, release: &'a Release, updater_dir: &'a Path, on_progress: ProgressFn,
+    ) -> BoxFuture<'a, Result<PathBuf, DownloadError>> {
         Box::pin(async move {
             self.downloads.fetch_add(1, Ordering::SeqCst);
             let gate = self.download_gate.lock().unwrap().take();
@@ -108,7 +110,11 @@ impl Platform for MockPlatform {
                 gate.notified().await;
             }
             on_progress(release.info.content_length.unwrap_or(5), release.info.content_length);
-            self.download.lock().unwrap().clone()
+            let bytes = self.download.lock().unwrap().clone()?;
+            let archive = updater_dir.join(&release.info.filename);
+            std::fs::create_dir_all(updater_dir).unwrap();
+            std::fs::write(&archive, bytes).unwrap();
+            Ok(archive)
         })
     }
 
@@ -256,7 +262,7 @@ async fn a_miss_an_error_or_a_panicked_check_returns_to_idle() {
 async fn failed_download_or_staging_persists_nothing_and_returns_to_idle() {
     let tmp = TempDir::new();
     let h = Harness::idle(&tmp, MockPlatform::new(Some("1.1.0")));
-    *h.platform.download.lock().unwrap() = Err("network".into());
+    *h.platform.download.lock().unwrap() = Err(DownloadError::Failed("refused".into()));
     assert_eq!(h.svc.check_now().await, State::Idle);
     assert!(!h.archive("1.1.0").exists());
     *h.platform.download.lock().unwrap() = Ok(b"bytes".to_vec());
@@ -265,6 +271,45 @@ async fn failed_download_or_staging_persists_nothing_and_returns_to_idle() {
     assert!(!h.archive("1.1.0").exists());
     assert!(h.persisted().ready.is_none());
     assert!(!persist::staged_dir(&h.dir).exists());
+}
+
+#[tokio::test]
+async fn an_interrupted_download_keeps_what_arrived_and_continues_on_the_next_tick() {
+    let tmp = TempDir::new();
+    let h = Harness::idle(&tmp, MockPlatform::new(Some("1.1.0")));
+    let [part, _] = reqwest_resumable::partial_files(&h.dir.join(info("1.1.0").filename));
+    let [superseded, _] = reqwest_resumable::partial_files(&h.dir.join(info("1.0.5").filename));
+    std::fs::create_dir_all(&h.dir).unwrap();
+    std::fs::write(&part, b"by").unwrap();
+    std::fs::write(&superseded, b"old").unwrap();
+
+    // Nothing was interrupted yet, so the tick asks nothing.
+    h.svc.resume_interrupted().await;
+    assert_eq!(h.platform.checks.load(Ordering::SeqCst), 0);
+
+    *h.platform.download.lock().unwrap() = Err(DownloadError::Interrupted("connection reset".into()));
+    assert_eq!(h.svc.check_now().await, State::Idle);
+    assert_eq!(std::fs::read(&part).unwrap(), b"by", "the unfinished archive survives the failure");
+    assert!(!superseded.exists(), "an unfinished download of another release is dropped");
+
+    *h.platform.download.lock().unwrap() = Ok(b"bytes".to_vec());
+    h.svc.resume_interrupted().await;
+    assert!(h.svc.state().is_ready(&info("1.1.0")));
+    assert_eq!(h.platform.downloads.load(Ordering::SeqCst), 2);
+
+    // Ready: the tick has nothing left to continue.
+    h.svc.resume_interrupted().await;
+    assert_eq!(h.platform.downloads.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn a_download_that_cannot_succeed_waits_for_the_hourly_check() {
+    let tmp = TempDir::new();
+    let h = Harness::idle(&tmp, MockPlatform::new(Some("1.1.0")));
+    *h.platform.download.lock().unwrap() = Err(DownloadError::Failed("404 Not Found".into()));
+    assert_eq!(h.svc.check_now().await, State::Idle);
+    h.svc.resume_interrupted().await;
+    assert_eq!(h.platform.downloads.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -502,7 +547,8 @@ async fn recovery_discards_unverifiable_old_or_incomplete_caches() {
     for (version, manifest) in [("1.0.0", true), ("0.9.0", true), ("1.1.0", false)] {
         let tmp = TempDir::new();
         let h = Harness::new(&tmp, MockPlatform::new(Some(version)));
-        persist::write_archive(&h.dir, &info(version).filename, b"bytes").unwrap();
+        std::fs::create_dir_all(&h.dir).unwrap();
+        std::fs::write(h.dir.join(info(version).filename), b"bytes").unwrap();
         let state = persist::PersistedState {
             ready: Some(info(version)),
             manifest: manifest.then(|| serde_json::json!({ "version": version })),
