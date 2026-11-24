@@ -4,7 +4,7 @@ import { desktopDefaults, MIN_BLOCK_WIDTH, resolveAtlasBlocks } from "@nyssance/
 import { useAtlas } from "@nyssance/atlas/react";
 import { attachWindowDrag, tauriTrackpad } from "@nyssance/atlas/tauri";
 import { getIdentifier } from "@tauri-apps/api/app";
-import { isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { PanelLeftDashedIcon, PanelLeftIcon } from "lucide-react";
 import {
   createContext,
@@ -241,6 +241,20 @@ function useWorkspaceCanvas({
     atlasRef(node);
   }, [atlasRef]);
   useEffect(() => api && isTauri() && !nativeTitleBarDrag ? attachWindowDrag(api.root, onError) : undefined, [api, nativeTitleBarDrag, onError]);
+  useEffect(() => {
+    if (!api || !isTauri() || !nativeTitleBarDrag)
+      return;
+    const topbar = api.root.querySelector(":scope > [data-atlas-topbar]");
+    if (!topbar)
+      return;
+    const zoom = (event) => {
+      if (event.button !== 0 || event.detail !== 2 || event.target !== topbar)
+        return;
+      invoke("plugin:window|internal_toggle_maximize").catch(onError);
+    };
+    topbar.addEventListener("mouseup", zoom);
+    return () => topbar.removeEventListener("mouseup", zoom);
+  }, [api, nativeTitleBarDrag, onError]);
   useEffect(() => {
     if (!api || !trackpad || !isTauri())
       return;

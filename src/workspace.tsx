@@ -3,7 +3,7 @@ import { desktopDefaults, MIN_BLOCK_WIDTH, resolveAtlasBlocks } from "@nyssance/
 import { useAtlas } from "@nyssance/atlas/react"
 import { attachWindowDrag, tauriTrackpad } from "@nyssance/atlas/tauri"
 import { getIdentifier } from "@tauri-apps/api/app"
-import { isTauri } from "@tauri-apps/api/core"
+import { invoke, isTauri } from "@tauri-apps/api/core"
 import { PanelLeftDashedIcon, PanelLeftIcon } from "lucide-react"
 import {
   createContext,
@@ -373,6 +373,18 @@ function useWorkspaceCanvas({
     () => (api && isTauri() && !nativeTitleBarDrag ? attachWindowDrag(api.root, onError) : undefined),
     [api, nativeTitleBarDrag, onError]
   )
+  // The system title bar moves the window but does not zoom it: a double-click on the bare top inset does.
+  useEffect(() => {
+    if (!api || !isTauri() || !nativeTitleBarDrag) return
+    const topbar = api.root.querySelector<HTMLElement>(":scope > [data-atlas-topbar]")
+    if (!topbar) return
+    const zoom = (event: MouseEvent) => {
+      if (event.button !== 0 || event.detail !== 2 || event.target !== topbar) return
+      invoke("plugin:window|internal_toggle_maximize").catch(onError)
+    }
+    topbar.addEventListener("mouseup", zoom)
+    return () => topbar.removeEventListener("mouseup", zoom)
+  }, [api, nativeTitleBarDrag, onError])
   useEffect(() => {
     if (!api || !trackpad || !isTauri()) return
     return connectTrackpad(api, tauriTrackpad({ command: "plugin:alwith-desktop-shell|has_trackpad" }), onError)
